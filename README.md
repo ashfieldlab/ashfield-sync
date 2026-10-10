@@ -1,91 +1,55 @@
+<div align="center">
+
+<img src="src/assets/ashfield-mark.svg" width="72" alt="Ashfield" />
+
 # Ashfield Sync
 
-Windows desktop sync client for [Ashfield Drive](https://github.com/ashfieldlab/ashfield-drive).
+Ashfield Drive 의 Windows 데스크톱 동기화 앱
 
-Ashfield Sync runs in the system tray and mirrors your Ashfield Drive files into a
-local folder (default `%USERPROFILE%\Ashfield`). It uses the Windows Cloud Files API
-(Files On-Demand), so files appear as placeholders and are downloaded only when
-opened. Local edits are uploaded automatically, and server changes arrive over SSE.
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev)
+[![Windows](https://img.shields.io/badge/Windows-only-0078D4?style=flat-square)](#)
+[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)](LICENSE)
 
-- **Windows only.** It depends on the Windows Cloud Files API. macOS and Linux are not supported.
-- **Needs an Ashfield Drive server.** The app is only a client. You have to run your own server.
-- Built with Tauri 2 (Rust) and React 19 + Vite.
+</div>
 
-## Configuration
+트레이에서 조용히 돌면서 Drive 의 파일을 내 PC 폴더(`%USERPROFILE%\Ashfield`)와 맞춰 둡니다.
 
-Copy `.env.example` to `.env` and set:
+- **필요할 때만 다운로드** — 파일은 자리만 차지하고, 열 때 내려받습니다 (Windows Files On-Demand)
+- **양방향 동기화** — 로컬에서 고치면 올라가고, 서버 변경은 바로 반영됩니다
+- **잠긴 폴더** — Drive 의 종단간 암호화 폴더를 PC 에서 열고 잠급니다
+- **Ashfield 계정** — 웹과 같은 계정으로 로그인합니다
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `VITE_ACCOUNT_URL` | `http://localhost:3300` | Ashfield account server (OIDC issuer). Login goes here. |
-| `VITE_DRIVE_URL` | `http://localhost:8200` | Ashfield Drive **API base** (backend). All `/api/v1` calls go here. (`VITE_API_URL` is still read as a fallback.) |
-| `VITE_DRIVE_RESOURCE` | `http://localhost:3200` | OAuth `resource` = the `aud` of the access token. See below. |
-| `VITE_OAUTH_CLIENT_ID` | `ashfield-sync` | OAuth client registered on the account server |
-| `VITE_OAUTH_REDIRECT_PORT` | `1421` | Loopback callback port |
+Windows 전용이며, 실행 중인 [Ashfield Drive](https://github.com/ashfieldlab/ashfield-drive) 서버가 필요합니다.
 
-These values are baked in at build time.
+## 시작하기
 
-### Login (Ashfield account server)
-
-The app signs in with the central Ashfield account server, following its contract
-(`ashfield-account/docs/adr/0001-account-server-contract.md`):
-
-- Endpoints come from `${VITE_ACCOUNT_URL}/.well-known/openid-configuration`.
-  If discovery fails, the app falls back to `/api/auth/oauth2/{authorize,token,revoke}`.
-- `ashfield-sync` is a public client: no secret, PKCE (S256) required, plus `state`, `nonce`
-  and the RFC 9207 `iss` check on the callback.
-- The redirect URI is `http://127.0.0.1:<VITE_OAUTH_REDIRECT_PORT>/oauth/callback`. It must
-  match one of the account server's `SYNC_REDIRECT_URIS` exactly.
-- Scope is `openid profile email offline_access`. Without `offline_access` the server issues no refresh token.
-- The authorize, code-exchange and refresh requests all send `resource=<VITE_DRIVE_RESOURCE>`.
-  Without it the access token is opaque, and the Drive backend can't verify it.
-
-**Choosing `VITE_DRIVE_RESOURCE`:** the account server only accepts the resource linked
-to `ashfield-sync`, which is its `DRIVE_URL` setting: the Drive **public URL**
-(the frontend, `http://localhost:3200` in local dev). The Drive backend checks the
-same value as `AUTH_AUDIENCE`. In local dev the API base (`:8200`) differs from the
-resource (`:3200`), so they are separate settings. In production, if the frontend and API share one origin
-(for example `https://drive.example.com`), both get the same value.
-
-**Refresh tokens rotate.** Every refresh returns a new refresh token, and the old one stops working.
-If an old token is sent again, the server revokes the whole token family. All refreshes
-in the app go through one lock in `src-tauri/src/oauth.rs`. The UI (API 401),
-the SSE reconnect and the Files On-Demand hydration threads share one access-token cache,
-so only one refresh is ever in flight. The newest refresh token is written to Windows
-Credential Manager after each refresh. If a refresh fails with `invalid_grant`, the
-stored token is deleted and the app shows the login screen.
-
-**Logout** revokes the refresh token at the server's `revocation_endpoint` and then clears it
-from Credential Manager. This doesn't end the account server's browser session.
-To disconnect the device remotely, use "연결된 앱" on the account home page.
-
-The app talks to the Drive API through Tauri's HTTP plugin, which only allows hosts
-on an allowlist. Add your Drive API host to the `http:default` entry in
-`src-tauri/capabilities/default.json`, for example:
-
-```json
-{ "url": "https://drive.your-domain.com/*" }
-```
-
-The default list only contains `http://localhost:*` and the placeholder
-`https://drive.example.com/*`. The account server is called only from Rust (`reqwest`),
-so it doesn't need an allowlist entry.
-
-## Development
-
-Requires Node.js and a Rust toolchain on Windows (see the
-[Tauri prerequisites](https://tauri.app/start/prerequisites/)).
+Windows 에 Node.js 와 Rust 가 필요합니다 ([Tauri 준비물](https://tauri.app/start/prerequisites/)).
 
 ```bash
+cp .env.example .env   # 서버 주소 설정
 npm install
 npm run tauri dev
 ```
 
-After the server API changes, regenerate the typed client from `openapi.json`
-with `npm run gen:api`.
+## 문서
 
-## Release
+- [설정과 로그인](docs/configuration.md) — 환경 변수, 로그인 방식
+- [릴리스](RELEASE.md) — 업데이트 서명 키, 빌드, GitHub Releases 배포
+- [설계 노트](DESIGN.html)
 
-See [RELEASE.md](RELEASE.md) for the updater signing key, the build, and publishing to GitHub Releases.
+## Ashfield
 
-Design notes are in [DESIGN.html](DESIGN.html).
+| | |
+|---|---|
+| [Account](https://github.com/ashfieldlab/ashfield-account) | 계정 · 워크스페이스 |
+| [Calendar](https://github.com/ashfieldlab/ashfield-calendar) | 일정 · 회의실 · 예약 |
+| [Drive](https://github.com/ashfieldlab/ashfield-drive) | 파일 저장 · 공유 |
+| [Sync](https://github.com/ashfieldlab/ashfield-sync) | Drive 데스크톱 동기화 (Windows) |
+
+## 라이선스
+
+MIT
