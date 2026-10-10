@@ -1,0 +1,62 @@
+[package]
+name = "ashfield-sync"
+version = "0.1.0"
+description = "Ashfield Sync – desktop sync client for Ashfield Drive"
+authors = ["ashfieldlab"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "ashfield_sync_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-shell = "2.3.5"
+tauri-plugin-store = "2.4.3"
+tauri-plugin-http = "2"
+
+# OAuth (PKCE) — Keycloak SSO 연동
+# keyring v3 는 platform feature 미명시 시 mock(in-memory) 저장소로 fallback —
+# 재시작하면 token 증발. windows-native 명시 필수.
+keyring = { version = "3", features = ["windows-native"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
+rand = "0.8"
+base64 = "0.22"
+sha2 = "0.10"
+# E2E vault 파일 hydrate 복호화 (ADR-0016 V5b) — whole-file AES-256-GCM
+aes-gcm = "0.10"
+url = "2"
+urlencoding = "2"
+webbrowser = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net"] }
+# 로컬 변경 감지 (F1) — Windows 에선 ReadDirectoryChangesW 를 감쌈
+notify = "6"
+notify-debouncer-full = "0.3"
+futures-util = "0.3"
+
+# Cloud Files API (Files On-Demand VFS) — Windows 전용
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Storage_CloudFilters",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_CorrelationVector",
+] }
+

@@ -1,0 +1,29 @@
+# 모든 텍스트 파일을 LF 로 통일. Windows 의 core.autocrlf 가 working tree
+# 를 CRLF 로 만지면 매 pull 마다 "수정됨" 으로 보이는 사고가 난다.
+* text=auto eol=lf
+
+# Windows 전용 파일은 CRLF 강제
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 바이너리 — git diff 가 텍스트로 잘못 처리하지 않게 명시
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.pdf binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ashfield Sync",
+  "version": "0.1.0",
+  "identifier": "io.github.ashfieldlab.sync",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Ashfield Sync",
+        "width": 620,
+        "height": 560,
+        "minHeight": 480,
+        "resizable": true,
+        "maximizable": false,
+        "decorations": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxNjkwMDYyMjE2Rjc0NDcKUldSSGRHOGhZZ0Jwa1FrckRuNzNQOHFrenNYUi9teFpVOGE5Q0F0S0JLN3U3dk1wVFlDYmM5MmUK",
+      "endpoints": [
+        "https://github.com/ashfieldlab/ashfield-sync/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

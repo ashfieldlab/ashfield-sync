@@ -1,0 +1,258 @@
+/* Ashfield 디자인 토큰 — neutral 팔레트 + 브랜드 그린 */
+:root {
+  --brand: #3f4a3c;          /* Ashfield 마크 그린 */
+  --ink: #252525;            /* foreground */
+  --sub: #737373;            /* muted-foreground */
+  --line: #e5e5e5;           /* border */
+  --bg: #ffffff;
+  --bg-soft: #f7f7f8;
+  --primary: #1a1a1a;        /* near-black primary */
+  --primary-ink: #ffffff;
+  --danger: #c5302f;
+  --radius: 8px;
+
+  font-family: "Pretendard", -apple-system, "Segoe UI", "Apple SD Gothic Neo", sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+/* 커스텀 타이틀바 — 흰 배경 + Ashfield 마크 */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  z-index: 1000;
+  user-select: none;
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  height: 100%;
+  color: var(--sub);
+}
+
+.titlebar-logo {
+  height: 18px;
+  width: auto;
+  display: block;
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+}
+
+.tb-btn {
+  width: 46px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--sub);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tb-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ink);
+}
+
+.tb-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* 공통 컨트롤 — 버튼/셀렉트 */
+button {
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+button:hover {
+  background: var(--bg-soft);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+select,
+input[type="text"],
+input[type="password"] {
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+}
+
+select:focus,
+input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+  padding-top: 56px; /* 40px 타이틀바 + 여백 */
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+
+h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.subtitle {
+  color: #6b7280;
+  font-size: 13px;
+  margin: 0 0 24px;
+}
+
+.subtitle code {
+  background: #e5e7eb;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.login {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 600px;
+}
+
+/* 주요 CTA — 다크 primary */
+.login button {
+  margin-top: 12px;
+  background: var(--primary);
+  color: var(--primary-ink);
+  border: 1px solid var(--primary);
+  padding: 10px 24px;
+  font-size: 14px;
+}
+
+.login button:hover {
+  background: #000;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+}
+
+.app-header small {
+  color: var(--sub);
+}
+
+.controls {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  align-items: center;
+}
+
+.list {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.header-row,
+.list-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 100px 100px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 13px;
+}
+
+.header-row {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.list-row:hover {
+  background: #f9fafb;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.etag {
+  font-family: ui-monospace, "SF Mono", monospace;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.empty {
+  text-align: center;
+  color: #9ca3af;
+  padding: 48px;
+}
+
+.error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 12px;
+  border-radius: 6px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ashfield Sync — 설계 결정 (ADR-0015)</title>
+<style>
+  :root {
+    --ink: #1a1f2e;
+    --sub: #5a6478;
+    --line: #e3e7ef;
+    --accent: #c5302f;
+    --accent-soft: #fdf0f0;
+    --ok: #1a7f4b;
+    --ok-soft: #e9f7ef;
+    --wip: #b07a00;
+    --wip-soft: #fdf6e3;
+    --todo: #5a6478;
+    --todo-soft: #eef1f6;
+    --code-bg: #f4f6fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 24px 96px;
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    color: var(--ink); background: #fafbfd; line-height: 1.65;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .meta { color: var(--sub); font-size: 14px; margin-bottom: 36px; }
+  .meta code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  h2 { font-size: 20px; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; }
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 12px;
+    padding: 20px 22px; position: relative;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 16px; padding-right: 64px; }
+  .card .num {
+    display: inline-block; min-width: 24px; height: 24px; line-height: 24px;
+    text-align: center; background: var(--ink); color: #fff; border-radius: 6px;
+    font-size: 13px; font-weight: 700; margin-right: 8px;
+  }
+  .card p { margin: 6px 0; font-size: 14px; color: var(--sub); }
+  .card .pick { color: var(--ink); font-weight: 600; }
+  .badge {
+    position: absolute; top: 18px; right: 18px;
+    font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  }
+  .done   { background: var(--ok-soft);   color: var(--ok); }
+  .wip    { background: var(--wip-soft);  color: var(--wip); }
+  .todo   { background: var(--todo-soft); color: var(--todo); }
+  .amend {
+    margin-top: 10px; padding: 10px 14px; border-left: 3px solid var(--accent);
+    background: var(--accent-soft); border-radius: 0 8px 8px 0; font-size: 13.5px;
+  }
+  .amend b { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { background: var(--code-bg); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  .flow {
+    background: var(--ink); color: #d8dce6; border-radius: 12px;
+    padding: 20px 24px; font-family: "Cascadia Code", Consolas, monospace;
+    font-size: 13.5px; overflow-x: auto; white-space: pre; line-height: 1.8;
+  }
+  .flow .hl { color: #7ec8a3; }
+  .progress { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 0; }
+  .step {
+    flex: 1; min-width: 180px; background: #fff; border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; font-size: 13.5px;
+  }
+  .step b { display: block; font-size: 14px; margin-bottom: 4px; }
+  footer { margin-top: 64px; color: var(--sub); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Ashfield Sync — 설계 결정</h1>
+<p class="meta">
+  ADR-0015 (2026-06-12 결정) 의 grilling 정리 · 원문: <code>ashfield-drive/docs/adr/0015-desktop-client.md</code><br>
+  배경: 웹 브라우저 단독 파일 접근의 다운로드–편집–업로드 사이클 불편 (HWP 라운드트립 · 큰 파일 · 오프라인)<br>
+  <b>상태 (2026-06-13): Phase 1·2·3 완료 (Authenticode 서명만 보류). 양방향 sync(크기 무관) + 트레이 상주 + 온보딩 + 자동 업데이트 + SSE + OpenAPI 자동생성, Windows 실기기 검증.</b>
+</p>
+
+<h2>결정 12개</h2>
+<div class="grid">
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">1</span>Tauri (JS UI + Rust)</h3>
+    <p><span class="pick">Electron 대신 Tauri.</span> UI 는 React, 시스템 통합은 Rust (<code>windows-rs</code>). binary ~10–20MB (Electron 100MB+ 대비).</p>
+    <p>대안: Electron(무거움) / 순수 Rust GUI(생산성↓) / .NET(스택 이질)</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">2</span>Windows-only</h3>
+    <p><span class="pick">macOS / Linux 명시적 미지원.</span> 타깃 사용자 (한국 기업/공공) 거의 전부 Windows. 잘못된 가정으로 판명 시 별도 ADR.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">3</span>Cloud Files API — Files On-Demand</h3>
+    <p><span class="pick">Windows native VFS.</span> placeholder (수 KB) → 열면 hydrate (1MB 스트리밍 CfExecute). FUSE/WebDAV mount 의 quirk 회피.</p>
+    <p>구현: CfRegisterSyncRoot(E1) · CfCreatePlaceholders(E2) · FETCH_DATA 콜백 hydrate(E3) · polling 연동(E4) · 자동 bootstrap(E5). 428MB 파일도 로컬처럼 열림 검증.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">4</span>OAuth + PKCE — Keycloak SSO 일관</h3>
+    <p><span class="pick">App Token paste 패턴 회피.</span> 시스템 브라우저 → Keycloak → loopback callback (<code>localhost:1421</code>) → token 교환. refresh_token 은 Windows Credential Manager.</p>
+    <p>App Password 는 headless / 표준 프로토콜용 탈출구 — GUI 클라이언트는 OAuth 정공.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">5</span>access_token 자동 refresh</h3>
+    <p><span class="pick">401 → single-flight refresh → 재시도 1회.</span> refresh 실패 (revoked / SSO 종료) 시 "세션 만료" 안내 + 로그인 화면 복귀.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">6</span>양방향 sync + 충돌 사본</h3>
+    <p><span class="pick">ETag (<code>If-Match</code>) optimistic locking.</span> 로컬 변경(notify watcher)을 직렬 큐로 backend 반영 — 신규/수정/삭제/이름변경.</p>
+    <p>구현: F0 overwrite API(write-to-new-key+swap) · F1 watcher(self-write 로 hydrate 자기변경 무시) · F2 업로드 · F3 충돌 사본 <code>foo (충돌본 2026-06-13 PC명).docx</code> · A 대용량 multipart 업로드. 작은 파일·큰 파일·신규·수정 전부 양방향 대칭.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">backend 완료</span>
+    <h3><span class="num">7</span>Delta polling 1분</h3>
+    <p><span class="pick"><code>GET /api/v1/nodes/changes?since=</code></span> — audit_logs 기반. 권한 회수도 <code>access_revoked</code> 로 내려와 placeholder + cache 즉시 삭제. SSE 는 Phase 3 이후.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">8</span>Sync 범위</h3>
+    <p><span class="pick">Personal + Shared (회사×{내 파일,회사 공유}).</span> Trash 제외 (Windows 휴지통과 혼동 방지). ExternalLink 는 외부 사용자용이라 무관. FileShare 받은 것은 후속.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge wip">수정됨</span>
+    <h3><span class="num">9</span>Multi-company — 회사별 root 폴더</h3>
+    <p><span class="pick">활성 회사 전환 개념 없음 — 동시 sync.</span> <code>~\Ashfield\{회사}\...</code> 웹 sidebar 와 1:1.</p>
+    <div class="amend"><b>2026-06-12 수정:</b> 온보딩에서 sync 회사 선택(opt-in) → <b>opt-out 모델</b>로 변경. 기본 = 전체 회사 sync (placeholder 라 디스크 비용 ~0). 제외는 설정 화면 toggle. 신규 회사 배정 시 자동 등장. 온보딩 = 로그인 + 폴더 위치 확인만.</div>
+  </div>
+
+  <div class="card">
+    <span class="badge todo">Phase 4 검토</span>
+    <h3><span class="num">10</span>Multi-device 자동</h3>
+    <p><span class="pick">backend 는 device 추적 안 함.</span> 회사 PC + 집 PC 동시 OK — 충돌은 ETag + 충돌 사본으로. device registration 은 SaaS 단계 검토.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">11</span>별도 repo <code>ashfield-sync</code></h3>
+    <p><span class="pick">release cycle 분리</span> (월 단위 vs 매 commit). API contract 는 OpenAPI auto-generate (Phase 2–3) — backend 변경이 컴파일 에러로 잡히게.</p>
+  </div>
+
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3><span class="num">12</span>표시 이름 "Ashfield Sync"</h3>
+    <p><span class="pick">브랜드 + root 폴더 <code>~\Ashfield\</code> 일관.</span> 앱 표시 이름은 Ashfield Sync.</p>
+  </div>
+
+</div>
+
+<h2>사용자 흐름 (현재 동작)</h2>
+<div class="flow">1. .msi 설치 → 첫 실행
+2. 시스템 브라우저 → Keycloak SSO 로그인        <span class="hl">← 동작</span>
+3. 로컬 폴더 확인 (default ~\Ashfield\)          <span class="hl">← opt-out, 자동 bootstrap</span>
+4. 첫 sync — placeholder 생성                    <span class="hl">← 동작</span>
+5. 탐색기에서 파일 보임 → 클릭 → 자동 hydrate    <span class="hl">← 동작 (vault 는 복호화 hydrate)</span>
+6. 편집 → 저장 → 자동 upload → 1분 내 반영       <span class="hl">← 동작 (vault 는 암호화 upload)</span></div>
+
+<h2>Phase 로드맵</h2>
+<div class="progress">
+  <div class="step"><b>Phase 1 — POC ✅</b>OAuth ✓ · 자동 refresh ✓ · tree ✓ · 설정 저장 ✓ · delta polling ✓ · VFS placeholder + hydrate ✓</div>
+  <div class="step"><b>Phase 2 — 양방향 ✅</b>로컬 변경 감지 ✓ · 양방향 sync ✓ · 충돌 사본 ✓ · 대용량 multipart 업로드 ✓ &nbsp;(남음: OpenAPI contract)</div>
+  <div class="step"><b>Phase 3 — 외부 배포 ✅</b>트레이 상주 ✓ · 온보딩 마법사 ✓ · 자동 업데이트(minisign) ✓ · SSE nudge ✓ · OpenAPI 타입 자동생성 ✓ · 커스텀 타이틀바 ✓ &nbsp;(보류: Authenticode 서명)</div>
+  <div class="step"><b>Phase 4 — SaaS</b>Multi-company UI · 다국어 · Sentry · device registration</div>
+</div>
+
+<h2>대안 비교 (원 ADR)</h2>
+<table>
+  <tr><th>옵션</th><th>우리 작업</th><th>UX</th><th>한계</th></tr>
+  <tr><td>WebDAV proxy mount</td><td>1주</td><td>OS mount, 익숙</td><td>binary 서버 통과 · 동시 협업 X · OS quirks</td></tr>
+  <tr><td>WebDAV Hybrid (S3 redirect)</td><td>1주</td><td>rclone mount</td><td>PUT redirect 호환성 ↓</td></tr>
+  <tr><td>Nextcloud Desktop fork</td><td>2–3개월</td><td>VFS + overlay 완비</td><td>GPL viral · server 호환 layer · 도메인 불일치</td></tr>
+  <tr><td>rclone wrapper</td><td>2–3주</td><td>mount / 주기 sync</td><td>VFS X · overlay X</td></tr>
+  <tr><td><b>Tauri + Cloud Files API (결정)</b></td><td><b>2.5개월 (MVP)</b></td><td><b>OneDrive 수준 native</b></td><td>Windows-only · signing 셋업</td></tr>
+</table>
+
+<h2>보안 메모</h2>
+<table>
+  <tr><th>항목</th><th>방식</th></tr>
+  <tr><td>refresh_token 보관</td><td>Windows Credential Manager (OS 암호화, 사용자 격리) — JS 메모리/디스크 노출 X</td></tr>
+  <tr><td>access_token</td><td>메모리만 · TTL ~5분 · 만료 시 자동 refresh</td></tr>
+  <tr><td>PKCE</td><td>code 탈취 후 재사용 차단 — verifier 는 앱 메모리에만, Keycloak 은 SHA256 해시(challenge)만 봄</td></tr>
+  <tr><td>cache 폴더</td><td><code>%LOCALAPPDATA%\Ashfield\cache\</code> — OS user 권한 격리</td></tr>
+  <tr><td>권한 회수</td><td>delta 의 <code>access_revoked</code> → placeholder + cache 즉시 삭제</td></tr>
+</table>
+
+<h2>E2E 보안 폴더 (Vault, ADR-0016)</h2>
+<p class="meta" style="margin-bottom:16px">
+  특정 폴더를 봉투 암호화 — 개발자·관리자조차 못 봄. 키 체인:
+  <code>비밀번호 ─argon2id→ KEK ─AES→ 개인키 ─RSA→ vault_key ─AES→ {파일명,DEK} ─AES→ 파일</code>.
+  서버는 암호 연산 0, 불투명 blob·ciphertext 이름만 보관. 싱크는 web 과 동일 봉투를 재사용.
+</p>
+<div class="grid">
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3>V5a — 이름 복호화 · 구조 유지</h3>
+    <p>잠금해제 시 vault 파일/폴더명을 복호화해 표시(잠김=내용 숨김, 루트만). <span class="pick">prune 은 startup·잠금토글 시 1회만</span> — 매 sync 마다 돌면 막 만든 미업로드 로컬파일이 날아가는 레이스가 생겨 금지.</p>
+  </div>
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3>V5b — hydrate 복호화</h3>
+    <p>FETCH_DATA(OS 스레드)는 JS 를 await 못 함 → JS 가 <span class="pick">DEK 를 사전 적재</span>(<code>vfs_set_deks</code>, node_id→raw 키). whole-file AES-GCM 이라 전체를 받아 한 번에 복호화. placeholder 크기 = <code>size_bytes − 28</code>(iv12+tag16) 로 평문과 일치시켜 잘림 방지.</p>
+  </div>
+  <div class="card">
+    <span class="badge done">완료</span>
+    <h3>V5c — 암호화 업로드 (편집 지원)</h3>
+    <p>싱크의 목적은 편한 편집 — vault 도 써야 함. <code>vfs_encrypt_to_temp</code> 가 평문을 <code>[iv][ct][tag]</code> temp 로 암호화 → 기존 업로드 머신(single/multipart) 재사용. create/modify(+wrapped_dek) · rename(암호화 이름) · delete. <span class="pick">평문은 이름·내용 모두 서버로 안 나감.</span></p>
+  </div>
+  <div class="card">
+    <span class="badge todo">남음</span>
+    <h3>V6 — 공유 · 복구 · 표시</h3>
+    <p>공유(타인 공개키로 vault_key wrap) · 복구코드 생성/표시 · plain_size 표시(현재 vault 파일 크기가 암호문 +28B 로 보임).</p>
+  </div>
+</div>
+
+<h2>재검토 / 알려진 한계</h2>
+<table>
+  <tr><th>항목</th><th>현재</th><th>재검토 방향</th></tr>
+  <tr>
+    <td><b>임시파일 무시 휴리스틱</b><br><code>watcher::is_ignored</code></td>
+    <td>파일<b>명 패턴</b>만으로 판단 — <code>~$</code>·<code>.~lock.</code>·<code>.tmp</code>·<code>.swp</code>·<code>.crdownload</code>·<code>.part</code>·<code>.DS_Store</code>·<code>Thumbs.db</code>. 내용·상태가 아니라 이름 추측.</td>
+    <td><b>정확하지 않음 — 재설계 필요.</b> ① 목록에 없는 임시패턴 놓침(<code>~문서.docx</code>·<code>.bak</code>·편집기별 랜덤 임시명·atomic-save temp). ② 사용자가 진짜 <code>메모.tmp</code> 로 지으면 동기화 누락. 후보: 편집기 atomic-save 실관찰 후 패턴 보강 / debounce 안정화 후 최종본만 / 무시목록 사용자 설정화.</td>
+  </tr>
+  <tr>
+    <td><b>vault 파일 크기 상한</b></td>
+    <td>200MB 초과 거부(상태줄 안내). whole-file AES-GCM = 평문+암호문 통째 메모리(~2배), 매 저장 전체 재업로드.</td>
+    <td>거부된 큰 파일이 로컬에만 남아 <b>다음 startup prune 에 삭제</b>될 수 있음(놀람). prune 제외 또는 vault 밖 이동 안내 보완. 대용량 필요 시 청크/프레임 AEAD(스트리밍·랜덤액세스, 포맷 변경)로 전환.</td>
+  </tr>
+  <tr>
+    <td><b>평문 hydrate 잔재</b></td>
+    <td>잠금해제 후 연 파일은 평문이 디스크에 남음. 로그아웃 시 DEK 만 폐기.</td>
+    <td>prune-on-logout 미구현 — 현재는 다음 로그인 startup prune 이 백스톱. 즉시 청소하려면 로그아웃 시 vault prune 호출.</td>
+  </tr>
+  <tr>
+    <td><b>vault 동시 편집 충돌</b></td>
+    <td>412 시 평문 충돌사본을 못 만들어 <b>서버 버전 우선</b>(로컬 변경 버려질 수 있음).</td>
+    <td>비-vault 의 충돌사본 대칭을 vault 에도 주려면 사본을 암호화해 새 노드로 — 추후.</td>
+  </tr>
+</table>
+
+<h2>메인 화면 · 운영 메모</h2>
+<div class="grid">
+  <div class="card">
+    <h3>메인 창 구성 (개편)</h3>
+    <p>암호문 이름+etag 를 그대로 뿌리던 <b>원시 노드 트리 덤프 제거</b>. 싱크 클라이언트다운 구성으로 교체:</p>
+    <p>• <b>동기화 상태 카드</b> — ✅정상/⚠️오류 + 마지막 확인 메시지<br>
+       • <b>📂 동기화 폴더 열기</b> — opener 플러그인으로 탐색기 오픈 (capability: <code>opener:allow-open-path</code> + scope <code>**</code>)</p>
+  </div>
+  <div class="card">
+    <h3>dev vs build — 빈 화면 함정</h3>
+    <p><code>target\debug\*.exe</code> 는 UI 를 <b>dev 서버(localhost)에서 로드</b>. 단독 실행(부팅·트레이·더블클릭)하면 dev 서버가 없어 <code>ERR_CONNECTION_REFUSED</code> 빈 화면.</p>
+    <p><span class="pick">개발=<code>npm run tauri dev</code></span> (Vite+exe 동반). <span class="pick">단독 실행 앱=<code>npm run tauri build</code></span> (프론트 번들). <b>autostart 는 release 빌드만 등록</b> — debug 는 <code>disable()</code> 로 잘못 등록된 부팅 시작도 정리.</p>
+  </div>
+</div>
+
+<footer>
+  ashfield-sync · 원본 결정 문서: ashfield-drive/docs/adr/0015-desktop-client.md · ADR-0016(E2E vault) · 갱신: 2026-06-14 (Phase 1·2·3 + E2E vault V5a/b/c, DB 암호화 검증, 메인 UI 개편(상태카드·활동피드·폴더열기), dev/build·autostart 정리. 재검토: 임시파일 휴리스틱)
+</footer>
+
+</div>
+</body>
+</html>
