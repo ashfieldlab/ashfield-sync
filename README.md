@@ -18,10 +18,10 @@ Ashfield Drive 의 Windows 데스크톱 동기화 앱
 
 트레이에서 조용히 돌면서 Drive 의 파일을 내 PC 폴더(`%USERPROFILE%\Ashfield`)와 맞춰 둡니다.
 
-- **필요할 때만 다운로드** — 파일은 자리만 차지하고, 열 때 내려받습니다 (Windows Files On-Demand)
-- **양방향 동기화** — 로컬에서 고치면 올라가고, 서버 변경은 바로 반영됩니다
-- **잠긴 폴더** — Drive 의 종단간 암호화 폴더를 PC 에서 열고 잠급니다
-- **Ashfield 계정** — 웹과 같은 계정으로 로그인합니다
+- **필요할 때만 다운로드**: 파일은 자리만 차지하고, 열 때 내려받습니다 (Windows Files On-Demand)
+- **양방향 동기화**: 로컬에서 고치면 올라가고, 서버 변경은 바로 반영됩니다
+- **잠긴 폴더**: Drive 의 종단간 암호화 폴더를 PC 에서 열고 잠급니다
+- **Ashfield 계정**: 웹과 같은 계정으로 로그인합니다
 
 Windows 전용이며, 실행 중인 [Ashfield Drive](https://github.com/ashfieldlab/ashfield-drive) 서버가 필요합니다.
 
@@ -37,8 +37,8 @@ npm run tauri dev
 
 ## 문서
 
-- [설정과 로그인](docs/configuration.md) — 환경 변수, 로그인 방식
-- [릴리스](RELEASE.md) — 업데이트 서명 키, 빌드, GitHub Releases 배포
+- [설정과 로그인](docs/configuration.md): 환경 변수, 로그인 방식
+- [릴리스](RELEASE.md): 업데이트 서명 키, 빌드, GitHub Releases 배포
 - [설계 노트](DESIGN.html)
 
 ## Ashfield

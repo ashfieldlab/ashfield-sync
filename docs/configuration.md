@@ -8,7 +8,7 @@
 |---|---|---|
 | `VITE_ACCOUNT_URL` | `http://localhost:3300` | Ashfield Account 주소 (로그인) |
 | `VITE_DRIVE_URL` | `http://localhost:8200` | Drive API 주소 (`/api/v1` 호출) |
-| `VITE_DRIVE_RESOURCE` | `http://localhost:3200` | 토큰의 `aud` — Drive 의 공개 주소 |
+| `VITE_DRIVE_RESOURCE` | `http://localhost:3200` | 토큰의 `aud`: Drive 의 공개 주소 |
 | `VITE_OAUTH_CLIENT_ID` | `ashfield-sync` | Account 에 등록된 클라이언트 |
 | `VITE_OAUTH_REDIRECT_PORT` | `1421` | 로그인 콜백 포트 |
 
@@ -30,7 +30,7 @@ Drive API 호스트는 `src-tauri/capabilities/default.json` 의 HTTP 허용 목
 - `offline_access` 로 리프레시 토큰을 받고, 모든 요청에 `resource` 를 붙여 JWT 액세스 토큰을 받습니다.
 - 리프레시 토큰은 Windows 자격 증명 관리자에 저장합니다.
 
-**리프레시 토큰 회전** — 갱신할 때마다 새 토큰이 오고, 옛 토큰을 다시 쓰면 서버가 토큰 묶음 전체를 폐기합니다.
+**리프레시 토큰 회전**: 갱신할 때마다 새 토큰이 오고, 옛 토큰을 다시 쓰면 서버가 토큰 묶음 전체를 폐기합니다.
 그래서 앱의 모든 갱신은 `src-tauri/src/oauth.rs` 의 잠금 하나를 거치며, UI · SSE · Files On-Demand 가 같은 액세스 토큰을 공유합니다.
 
 **로그아웃** 은 서버에서 리프레시 토큰을 폐기하고 자격 증명 관리자에서 지웁니다.
