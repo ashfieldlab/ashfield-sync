@@ -1,4 +1,4 @@
-//! SSE 클라이언트 (Phase 3) — backend 의 /nodes/events 를 구독해 실시간 nudge.
+//! SSE 클라이언트 (Phase 3): backend 의 /nodes/events 를 구독해 실시간 nudge.
 //!
 //! `data: change` 한 줄 받을 때마다 Tauri 이벤트 "remote-change" emit → JS 가
 //! 즉시 delta(/changes) 가져옴. polling 은 fallback 으로 유지.
@@ -13,17 +13,17 @@ use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter};
 
-// 세대 카운터 — stop() 또는 새 connect 시 증가시켜 옛 루프를 스스로 종료시킴.
+// 세대 카운터: stop() 또는 새 connect 시 증가시켜 옛 루프를 스스로 종료시킴.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 static ACTIVE: Mutex<Option<u64>> = Mutex::new(None);
 
 enum SseError {
-    /// 401 — access token 만료/거부. 갱신 후 재연결.
+    /// 401: access token 만료/거부. 갱신 후 재연결.
     Unauthorized,
     Other(String),
 }
 
-/// 유효한 access token (oauth 모듈의 직렬화된 refresh 를 거친다 — SSE 가 따로 refresh 하지 않음).
+/// 유효한 access token (oauth 모듈의 직렬화된 refresh 를 거친다: SSE 가 따로 refresh 하지 않음).
 async fn fresh_token(stale: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || crate::oauth::access_token_blocking(stale.as_deref()))
         .await
@@ -42,12 +42,12 @@ async fn run(app: AppHandle, url: String, initial_token: String, company: String
         if !is_current(gen) {
             return; // 새 세대/중지됨
         }
-        // 재연결마다 최신 토큰 — 연결이 오래 살아 있던 사이 만료됐을 수 있다 (캐시가 유효하면 그대로).
+        // 재연결마다 최신 토큰: 연결이 오래 살아 있던 사이 만료됐을 수 있다 (캐시가 유효하면 그대로).
         if !first {
             match fresh_token(None).await {
                 Ok(t) => token = t,
                 Err(e) if crate::oauth::is_auth_expired(&e) => {
-                    eprintln!("[sse] 세션 만료 — 중지: {e}");
+                    eprintln!("[sse] 세션 만료: 중지: {e}");
                     let _ = app.emit("auth-expired", e);
                     return;
                 }
@@ -57,30 +57,30 @@ async fn run(app: AppHandle, url: String, initial_token: String, company: String
         first = false;
         match connect_once(&app, &url, &token, &company, gen).await {
             Ok(()) => {
-                // 정상 종료(서버가 닫음) — 즉시 재연결 시도
+                // 정상 종료(서버가 닫음): 즉시 재연결 시도
                 backoff = 1;
             }
             Err(SseError::Unauthorized) => {
-                // 401 — 이 토큰은 거부됨(stale). 직렬화된 refresh 로 새 토큰 받아 바로 재연결.
+                // 401: 이 토큰은 거부됨(stale). 직렬화된 refresh 로 새 토큰 받아 바로 재연결.
                 match fresh_token(Some(token.clone())).await {
                     Ok(t) if t != token => {
                         token = t;
                         first = true; // 방금 받은 토큰으로 바로 연결
                         continue;
                     }
-                    Ok(_) => eprintln!("[sse] 401 이 계속됨 — {backoff}s 후 재시도"),
+                    Ok(_) => eprintln!("[sse] 401 이 계속됨: {backoff}s 후 재시도"),
                     Err(e) if crate::oauth::is_auth_expired(&e) => {
-                        eprintln!("[sse] 세션 만료 — 중지: {e}");
+                        eprintln!("[sse] 세션 만료: 중지: {e}");
                         let _ = app.emit("auth-expired", e);
                         return;
                     }
-                    Err(e) => eprintln!("[sse] 401 후 refresh 실패: {e} — {backoff}s 후 재시도"),
+                    Err(e) => eprintln!("[sse] 401 후 refresh 실패: {e}: {backoff}s 후 재시도"),
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
                 backoff = (backoff * 2).min(30);
             }
             Err(SseError::Other(e)) => {
-                eprintln!("[sse] 연결 오류: {e} — {backoff}s 후 재시도");
+                eprintln!("[sse] 연결 오류: {e}: {backoff}s 후 재시도");
                 tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
                 backoff = (backoff * 2).min(30); // 지수 백오프, 최대 30s
             }
@@ -120,7 +120,7 @@ async fn connect_once(
         }
         let bytes = chunk.map_err(|e| SseError::Other(format!("stream: {e}")))?;
         buf.push_str(&String::from_utf8_lossy(&bytes));
-        // SSE 이벤트는 빈 줄로 구분 — "data:" 라인이 있으면 nudge
+        // SSE 이벤트는 빈 줄로 구분: "data:" 라인이 있으면 nudge
         while let Some(pos) = buf.find("\n\n") {
             let event: String = buf.drain(..pos + 2).collect();
             if event.lines().any(|l| l.starts_with("data:")) {

@@ -1,14 +1,14 @@
-//! OAuth 2.1 + PKCE — Ashfield 계정 서버(OIDC 제공자) 로그인.
+//! OAuth 2.1 + PKCE: Ashfield 계정 서버(OIDC 제공자) 로그인.
 //!
 //! - 로그인: 시스템 브라우저 → 계정 서버 authorize → loopback callback
 //!   (`http://127.0.0.1:1421/oauth/callback`) → token 교환
 //! - 엔드포인트는 `${ACCOUNT_URL}/.well-known/openid-configuration` 에서 읽는다
 //!   (실패 시 계약상 기본 경로 `/api/auth/oauth2/*` 로 fallback)
-//! - authorize·token·refresh 모두 `resource=<DRIVE_RESOURCE>` — 이게 있어야 access token 이
+//! - authorize·token·refresh 모두 `resource=<DRIVE_RESOURCE>`: 이게 있어야 access token 이
 //!   JWT(aud ∋ DRIVE_RESOURCE)로 나와 Drive 백엔드가 JWKS 로 검증할 수 있다
 //! - refresh_token 은 OS keychain (Windows Credential Manager) 에 보관
 //! - refresh_token 은 **회전**한다: 갱신마다 새 값 저장, 옛 값을 다시 쓰면 패밀리 전체가 폐기됨.
-//!   그래서 갱신은 프로세스 전체에서 이 모듈 한 곳(`SESSION` 락)으로 직렬화한다 —
+//!   그래서 갱신은 프로세스 전체에서 이 모듈 한 곳(`SESSION` 락)으로 직렬화한다.
 //!   JS(API 401) · SSE 재연결 · VFS hydrate 스레드가 모두 여기로 온다 (single-flight).
 //!
 //! 계약: ashfield-account/docs/adr/0001-account-server-contract.md · 원 결정 ADR-0015.
@@ -29,13 +29,13 @@ use sha2::{Digest, Sha256};
 pub(crate) const KEYRING_SERVICE: &str = "ashfield-sync";
 pub(crate) const KEYRING_USERNAME: &str = "refresh_token";
 
-/// 계약 §2 — 이 클라이언트에 허용된 scope 전부. `offline_access` 가 있어야 refresh_token 이 나온다.
+/// 계약 §2: 이 클라이언트에 허용된 scope 전부. `offline_access` 가 있어야 refresh_token 이 나온다.
 pub(crate) const SCOPES: &str = "openid profile email offline_access";
 /// 만료 이만큼 전이면 캐시된 access token 을 버리고 갱신 (시계 오차·전송 지연 여유).
 const EXPIRY_SKEW: Duration = Duration::from_secs(60);
 /// 로그인 창에서 사용자를 기다리는 최대 시간.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
-/// refresh 가 재로그인 외엔 방법이 없을 때 에러 문자열 앞에 붙는 표식 — JS/SSE 가 이걸로 판별.
+/// refresh 가 재로그인 외엔 방법이 없을 때 에러 문자열 앞에 붙는 표식: JS/SSE 가 이걸로 판별.
 pub(crate) const AUTH_EXPIRED: &str = "auth_expired";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +44,7 @@ pub struct OAuthConfig {
     pub issuer: String,
     pub client_id: String,
     pub redirect_port: u16,
-    /// RFC 8707 resource — Drive 의 public URL (= access token `aud`). 예: http://localhost:3200
+    /// RFC 8707 resource: Drive 의 public URL (= access token `aud`). 예: http://localhost:3200
     pub resource: String,
 }
 
@@ -81,7 +81,7 @@ pub(crate) struct Endpoints {
 }
 
 impl Endpoints {
-    /// 디스커버리 실패 시 — 계약 §1 의 고정 경로.
+    /// 디스커버리 실패 시: 계약 §1 의 고정 경로.
     pub(crate) fn fallback(issuer: &str) -> Self {
         let iss = issuer.trim_end_matches('/');
         Self {
@@ -111,7 +111,7 @@ fn http() -> reqwest::blocking::Client {
         .unwrap_or_else(|_| reqwest::blocking::Client::new())
 }
 
-/// 디스커버리 문서에서 엔드포인트 — 성공한 결과만 프로세스 동안 캐시.
+/// 디스커버리 문서에서 엔드포인트: 성공한 결과만 프로세스 동안 캐시.
 fn endpoints(config: &OAuthConfig) -> Endpoints {
     let issuer = config.issuer.trim_end_matches('/').to_string();
     if let Some(ep) = ENDPOINTS.lock().unwrap().as_ref() {
@@ -143,7 +143,7 @@ fn endpoints(config: &OAuthConfig) -> Endpoints {
             ep
         }
         Err(e) => {
-            eprintln!("[oauth] discovery 실패 ({url}): {e} — 기본 경로 사용");
+            eprintln!("[oauth] discovery 실패 ({url}): {e}: 기본 경로 사용");
             fallback
         }
     }
@@ -158,7 +158,7 @@ fn stored_config() -> Result<OAuthConfig> {
         .lock()
         .unwrap()
         .clone()
-        .ok_or_else(|| anyhow!("oauth 설정 없음 — 로그인/refresh 가 먼저 호출돼야 함"))
+        .ok_or_else(|| anyhow!("oauth 설정 없음: 로그인/refresh 가 먼저 호출돼야 함"))
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ pub(crate) fn pkce_challenge(verifier: &str) -> String {
 }
 
 fn pkce_pair() -> (String, String) {
-    let verifier = random_url_safe(64); // 86자 — RFC 7636 의 43..128 범위
+    let verifier = random_url_safe(64); // 86자: RFC 7636 의 43..128 범위
     let challenge = pkce_challenge(&verifier);
     (verifier, challenge)
 }
@@ -212,7 +212,7 @@ pub(crate) fn build_authorize_url(endpoint: &str, p: &AuthorizeParams) -> Result
     Ok(url.into())
 }
 
-/// id_token payload 의 nonce (서명 검증 없이 — token 엔드포인트에서 TLS 로 직접 받은 값,
+/// id_token payload 의 nonce (서명 검증 없이: token 엔드포인트에서 TLS 로 직접 받은 값,
 /// API 호출엔 안 씀. 리플레이된 code 로 얻은 토큰 섞임만 막는 용도).
 fn id_token_nonce(id_token: &str) -> Option<String> {
     let payload = id_token.split('.').nth(1)?;
@@ -222,7 +222,7 @@ fn id_token_nonce(id_token: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// 세션 — access token 캐시 + 현재 refresh token. 이 락이 곧 refresh 직렬화 락.
+// 세션: access token 캐시 + 현재 refresh token. 이 락이 곧 refresh 직렬화 락.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -244,9 +244,9 @@ pub(crate) fn can_reuse(cached: &Session, stale: Option<&str>, now: Instant) -> 
 }
 
 pub(crate) enum RefreshError {
-    /// invalid_grant 등 — 저장된 refresh token 은 죽었다. 재로그인 필요.
+    /// invalid_grant 등: 저장된 refresh token 은 죽었다. 재로그인 필요.
     Expired(String),
-    /// 네트워크·5xx 등 — 토큰은 살아 있을 수 있음. 나중에 재시도.
+    /// 네트워크·5xx 등: 토큰은 살아 있을 수 있음. 나중에 재시도.
     Transient(String),
 }
 
@@ -299,7 +299,7 @@ fn keyring_entry() -> Result<Entry> {
 fn store_refresh(token: &str) {
     match keyring_entry().and_then(|e| e.set_password(token).map_err(Into::into)) {
         Ok(()) => {}
-        // 옛 값은 서버에서 이미 무효 — 메모리의 새 값으로 이 세션은 계속 간다.
+        // 옛 값은 서버에서 이미 무효: 메모리의 새 값으로 이 세션은 계속 간다.
         Err(e) => eprintln!("[oauth] keychain 에 새 refresh_token 저장 실패: {e}"),
     }
 }
@@ -359,7 +359,7 @@ fn refresh_grant(config: &OAuthConfig, current: Option<String>) -> Result<Sessio
     Ok(session_from(token, Some(refresh)))
 }
 
-/// 다른 모듈(SSE · VFS)용 — 유효한 access token (blocking; async 에선 spawn_blocking 으로).
+/// 다른 모듈(SSE · VFS)용: 유효한 access token (blocking; async 에선 spawn_blocking 으로).
 /// `stale` = 방금 401 받은 토큰 (있으면 그건 재사용하지 않음).
 pub(crate) fn access_token_blocking(stale: Option<&str>) -> Result<String, String> {
     let config = stored_config().map_err(|e| e.to_string())?;
@@ -407,7 +407,7 @@ fn wait_for_callback(listener: TcpListener, state: &str, issuer: &str) -> Result
             Ok(conn) => conn,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() > deadline {
-                    return Err(anyhow!("로그인 시간 초과 (5분) — 다시 시도하세요"));
+                    return Err(anyhow!("로그인 시간 초과 (5분): 다시 시도하세요"));
                 }
                 std::thread::sleep(Duration::from_millis(200));
                 continue;
@@ -427,7 +427,7 @@ fn wait_for_callback(listener: TcpListener, state: &str, issuer: &str) -> Result
             Err(_) => continue,
         };
         if parsed.path() != "/oauth/callback" {
-            // favicon 등 — 무시하고 계속 기다림
+            // favicon 등: 무시하고 계속 기다림
             let _ = respond(&mut stream, "404 Not Found", "");
             continue;
         }
@@ -449,7 +449,7 @@ fn wait_for_callback(listener: TcpListener, state: &str, issuer: &str) -> Result
             );
             return Err(anyhow!("authorize error: {} {}", err, desc));
         }
-        // RFC 9207 — 다른 IdP 가 보낸 응답 섞임(mix-up) 방지
+        // RFC 9207: 다른 IdP 가 보낸 응답 섞임(mix-up) 방지
         if let Some(iss) = query.get("iss") {
             if iss.trim_end_matches('/') != issuer {
                 let _ = respond(&mut stream, "400 Bad Request", "<h2>issuer 불일치</h2>");
@@ -477,9 +477,9 @@ fn login_blocking(config: OAuthConfig) -> Result<TokenSet> {
     let nonce = random_url_safe(16);
     let redirect_uri = redirect_uri(config.redirect_port);
 
-    // 1. loopback 먼저 listen — 브라우저가 callback 보내기 전에
+    // 1. loopback 먼저 listen: 브라우저가 callback 보내기 전에
     let listener = TcpListener::bind(("127.0.0.1", config.redirect_port)).context(format!(
-        "포트 {} bind 실패 — 다른 앱(또는 진행 중인 로그인)이 사용 중일 수 있음",
+        "포트 {} bind 실패: 다른 앱(또는 진행 중인 로그인)이 사용 중일 수 있음",
         config.redirect_port
     ))?;
 
@@ -500,7 +500,7 @@ fn login_blocking(config: OAuthConfig) -> Result<TokenSet> {
     // 3. callback
     let code = wait_for_callback(listener, &state, &ep.issuer)?;
 
-    // 4. code 교환 (public client — body 에 client_id, secret 없음)
+    // 4. code 교환 (public client: body 에 client_id, secret 없음)
     let res = http()
         .post(&ep.token)
         .form(&[
@@ -520,7 +520,7 @@ fn login_blocking(config: OAuthConfig) -> Result<TokenSet> {
     }
     let token: TokenResponse = res.json().context("parse token response")?;
     if token.refresh_token.is_none() {
-        eprintln!("[oauth] refresh_token 없음 — offline_access scope 가 허용됐는지 확인");
+        eprintln!("[oauth] refresh_token 없음: offline_access scope 가 허용됐는지 확인");
     }
     if let Some(idt) = token.id_token.as_deref() {
         if id_token_nonce(idt).as_deref() != Some(nonce.as_str()) {
@@ -529,7 +529,7 @@ fn login_blocking(config: OAuthConfig) -> Result<TokenSet> {
     }
     let id_token = token.id_token.clone();
 
-    // 5. 세션·keychain 교체 — refresh 락 안에서 (진행 중 refresh 가 옛 값으로 덮지 않게)
+    // 5. 세션·keychain 교체: refresh 락 안에서 (진행 중 refresh 가 옛 값으로 덮지 않게)
     let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
     let session = session_from(token, None);
     let out = TokenSet {
@@ -554,7 +554,7 @@ fn refresh_blocking(config: OAuthConfig, stale: Option<String>) -> Result<TokenS
 
 fn logout_blocking(config: OAuthConfig) -> Result<()> {
     let ep = endpoints(&config);
-    // 락을 쥐고 — 진행 중 refresh 가 끝난 뒤의 최신 refresh_token 을 폐기한다.
+    // 락을 쥐고: 진행 중 refresh 가 끝난 뒤의 최신 refresh_token 을 폐기한다.
     let mut guard = SESSION.lock().unwrap_or_else(|p| p.into_inner());
     let entry = keyring_entry()?;
     let refresh = guard
@@ -562,7 +562,7 @@ fn logout_blocking(config: OAuthConfig) -> Result<()> {
         .and_then(|s| s.refresh_token.clone())
         .or_else(|| entry.get_password().ok());
     if let Some(rt) = refresh {
-        // RFC 7009 — 실패해도 로컬 정리는 진행 (계정 홈 '연결된 앱'에서도 해제 가능)
+        // RFC 7009: 실패해도 로컬 정리는 진행 (계정 홈 '연결된 앱'에서도 해제 가능)
         let res = http()
             .post(&ep.revocation)
             .form(&[

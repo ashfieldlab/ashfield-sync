@@ -1,15 +1,15 @@
 /**
- * E2E 암호화 코어 (ADR-0016) — 봉투 암호화 원시 연산.
+ * E2E 암호화 코어 (ADR-0016): 봉투 암호화 원시 연산.
  *
  * 전부 브라우저 WebCrypto + hash-wasm(argon2id). 평문/키 평문은 이 모듈을 거쳐
- * 메모리에서만 존재 — 서버로 나가는 건 항상 암호문/wrap 된 키.
+ * 메모리에서만 존재: 서버로 나가는 건 항상 암호문/wrap 된 키.
  *
  * 키 체인: 비밀번호 ─argon2id(salt)→ KEK ─AES→ 개인키 ─RSA→ vault_key ─AES→ {파일명,DEK} ─AES→ 파일
  *
  * 알고리즘:
- *   - KDF: Argon2id (m=64MB, t=3, p=4)        — 비밀번호/복구코드 → 32B
- *   - 키쌍: RSA-OAEP 4096 / SHA-256           — 개인키·vault_key·DEK wrap
- *   - 대칭: AES-GCM 256 (12B IV, 16B tag)     — 개인키/파일/파일명 암호화
+ *   - KDF: Argon2id (m=64MB, t=3, p=4)       : 비밀번호/복구코드 → 32B
+ *   - 키쌍: RSA-OAEP 4096 / SHA-256          : 개인키·vault_key·DEK wrap
+ *   - 대칭: AES-GCM 256 (12B IV, 16B tag)    : 개인키/파일/파일명 암호화
  */
 
 import { argon2id } from "hash-wasm"
@@ -24,7 +24,7 @@ const bs = (u: Uint8Array): BufferSource => u as unknown as BufferSource
 const ARGON = { parallelism: 4, iterations: 3, memorySize: 64 * 1024 } // 64MB
 
 // ---------------------------------------------------------------------------
-// base64 (서버 전송용) — 표준 base64, URL-safe 아님
+// base64 (서버 전송용): 표준 base64, URL-safe 아님
 // ---------------------------------------------------------------------------
 export function toB64(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
@@ -40,7 +40,7 @@ export function fromB64(b64: string): Uint8Array {
   return out
 }
 
-// base64url — 파일명용. 표준 base64 의 `/` `+` `=` 는 Windows 경로/URL 에서
+// base64url: 파일명용. 표준 base64 의 `/` `+` `=` 는 Windows 경로/URL 에서
 // 문제라 `_` `-` 로 치환하고 패딩 제거. 암호화된 파일/폴더명에만 사용.
 export function toB64url(buf: ArrayBuffer | Uint8Array): string {
   return toB64(buf).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
@@ -59,7 +59,7 @@ function randomBytes(n: number): Uint8Array {
 }
 
 // ---------------------------------------------------------------------------
-// KEK — 비밀번호/복구코드에서 AES-GCM 키 유도 (Argon2id)
+// KEK: 비밀번호/복구코드에서 AES-GCM 키 유도 (Argon2id)
 // ---------------------------------------------------------------------------
 export function newSalt(): Uint8Array {
   return randomBytes(16)
@@ -77,7 +77,7 @@ export async function deriveKek(password: string, salt: Uint8Array): Promise<Cry
 }
 
 // ---------------------------------------------------------------------------
-// AES-GCM — 범용 대칭 암복호. 출력 = base64(iv(12) + ciphertext+tag)
+// AES-GCM: 범용 대칭 암복호. 출력 = base64(iv(12) + ciphertext+tag)
 // ---------------------------------------------------------------------------
 export async function aesEncrypt(key: CryptoKey, data: Uint8Array): Promise<string> {
   const iv = randomBytes(12)
@@ -96,7 +96,7 @@ export async function aesDecrypt(key: CryptoKey, b64: string): Promise<Uint8Arra
   return new Uint8Array(pt)
 }
 
-// 파일/폴더명 암복호 — 출력은 base64url (파일시스템·경로 안전, `/` `+` `=` 없음).
+// 파일/폴더명 암복호: 출력은 base64url (파일시스템·경로 안전, `/` `+` `=` 없음).
 // 표준 base64 면 `/` 가 경로 구분자로 오인돼 싱크 placeholder 경로가 깨진다.
 export async function aesEncryptText(key: CryptoKey, text: string): Promise<string> {
   const iv = randomBytes(12)
@@ -116,7 +116,7 @@ export async function aesDecryptText(key: CryptoKey, b64url: string): Promise<st
 }
 
 // ---------------------------------------------------------------------------
-// RSA-OAEP 키쌍 — 개인키는 AES 로 잠가 저장, 공개키는 평문
+// RSA-OAEP 키쌍: 개인키는 AES 로 잠가 저장, 공개키는 평문
 // ---------------------------------------------------------------------------
 export async function generateKeypair(): Promise<CryptoKeyPair> {
   return crypto.subtle.generateKey(
@@ -164,7 +164,7 @@ export async function importPrivateKeyEncrypted(b64: string, kek: CryptoKey): Pr
 }
 
 // ---------------------------------------------------------------------------
-// vault_key / DEK — AES-GCM 키. RSA(공개키)로 wrap, RSA(개인키)로 unwrap
+// vault_key / DEK: AES-GCM 키. RSA(공개키)로 wrap, RSA(개인키)로 unwrap
 // ---------------------------------------------------------------------------
 export async function generateAesKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
@@ -205,7 +205,7 @@ export async function unwrapKeyAes(b64: string, vaultKey: CryptoKey): Promise<Cr
 }
 
 // ---------------------------------------------------------------------------
-// 복구 코드 — 사람이 보관할 고엔트로피 문자열 (group-of-4)
+// 복구 코드: 사람이 보관할 고엔트로피 문자열 (group-of-4)
 // ---------------------------------------------------------------------------
 export function generateRecoveryCode(): string {
   const bytes = randomBytes(20) // 160bit

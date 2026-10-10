@@ -1,4 +1,4 @@
-/* Ashfield 디자인 토큰 — neutral 팔레트 + 브랜드 그린 */
+/* Ashfield 디자인 토큰: neutral 팔레트 + 브랜드 그린 */
 :root {
   --brand: #3f4a3c;          /* Ashfield 마크 그린 */
   --ink: #252525;            /* foreground */
@@ -25,7 +25,7 @@ body {
   margin: 0;
 }
 
-/* 커스텀 타이틀바 — 흰 배경 + Ashfield 마크 */
+/* 커스텀 타이틀바: 흰 배경 + Ashfield 마크 */
 .titlebar {
   position: fixed;
   top: 0;
@@ -88,7 +88,7 @@ body {
   color: #fff;
 }
 
-/* 공통 컨트롤 — 버튼/셀렉트 */
+/* 공통 컨트롤: 버튼/셀렉트 */
 button {
   font-family: inherit;
   font-size: 13px;
@@ -165,7 +165,7 @@ h2 {
   max-width: 600px;
 }
 
-/* 주요 CTA — 다크 primary */
+/* 주요 CTA: 다크 primary */
 .login button {
   margin-top: 12px;
   background: var(--primary);

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Ashfield Drive API",
-    "description": "\nAshfield Drive 백엔드 — 파일·캘린더 서버.\n\n## 공통 요청 헤더\n\n| 헤더 | 값 | 비고 |\n|------|----|------|\n| `Authorization` | `Bearer <JWT>` | Keycloak 발급. JWKS 로 서명 검증. |\n| `X-Active-Company-Id` | JWT `groups[i]` 중 하나 | 멀티 테넌트. 헤더가 JWT groups 에 없으면 403. |\n| `X-Request-ID` | UUID 등 trace id | 로그/응답 헤더에 echo. 없으면 자동 발급. |\n\n## 권한 모델 요약 (ADR-0008)\n\n- **scope=personal**: owner 만 접근. `FileShare` 로 명시적으로 부여하면 grantee 도 접근.\n- **scope=shared**: 같은 회사 멤버 모두 접근.\n- **공유 상속**: 폴더에 share 가 걸리면 자손도 자동 접근. 재귀 CTE 로 계산.\n- **공유 관리**: owner + `permission=manage` 보유자만.\n\n## 표준 응답 코드\n\n| 코드 | 의미 |\n|------|------|\n| 200 | OK |\n| 201 | 생성됨. body 에 새 리소스. |\n| 204 | OK, body 없음 |\n| 400 | 요청 자체가 잘못됨 (예: 폴더를 자손 아래로 이동) |\n| 401 | 인증 실패 (토큰 없음·만료·서명 불일치·revoke) |\n| 403 | 인증은 됐지만 권한 없음 |\n| 404 | 리소스 없음 — 다른 회사 리소스도 404 로 마스킹 |\n| 409 | 상태 충돌 (예: 업로드 미완료 파일 다운로드 시도) |\n| 413 | 페이로드 한도 초과 |\n| 422 | 검증 실패 (Pydantic) |\n\n## 외부 (인증 없음) 라우트\n\n`/s/{token}` 계열은 인증 헤더 없이 접근. 토큰 자체가 capability.\n\n자세한 흐름은 [SPEC.md](https://github.com/ashfieldlab/ashfield-drive/blob/main/SPEC.md) 참고.\n",
+    "description": "\nAshfield Drive 백엔드: 파일·캘린더 서버.\n\n## 공통 요청 헤더\n\n| 헤더 | 값 | 비고 |\n|------|----|------|\n| `Authorization` | `Bearer <JWT>` | Keycloak 발급. JWKS 로 서명 검증. |\n| `X-Active-Company-Id` | JWT `groups[i]` 중 하나 | 멀티 테넌트. 헤더가 JWT groups 에 없으면 403. |\n| `X-Request-ID` | UUID 등 trace id | 로그/응답 헤더에 echo. 없으면 자동 발급. |\n\n## 권한 모델 요약 (ADR-0008)\n\n- **scope=personal**: owner 만 접근. `FileShare` 로 명시적으로 부여하면 grantee 도 접근.\n- **scope=shared**: 같은 회사 멤버 모두 접근.\n- **공유 상속**: 폴더에 share 가 걸리면 자손도 자동 접근. 재귀 CTE 로 계산.\n- **공유 관리**: owner + `permission=manage` 보유자만.\n\n## 표준 응답 코드\n\n| 코드 | 의미 |\n|------|------|\n| 200 | OK |\n| 201 | 생성됨. body 에 새 리소스. |\n| 204 | OK, body 없음 |\n| 400 | 요청 자체가 잘못됨 (예: 폴더를 자손 아래로 이동) |\n| 401 | 인증 실패 (토큰 없음·만료·서명 불일치·revoke) |\n| 403 | 인증은 됐지만 권한 없음 |\n| 404 | 리소스 없음: 다른 회사 리소스도 404 로 마스킹 |\n| 409 | 상태 충돌 (예: 업로드 미완료 파일 다운로드 시도) |\n| 413 | 페이로드 한도 초과 |\n| 422 | 검증 실패 (Pydantic) |\n\n## 외부 (인증 없음) 라우트\n\n`/s/{token}` 계열은 인증 헤더 없이 접근. 토큰 자체가 capability.\n\n자세한 흐름은 [SPEC.md](https://github.com/ashfieldlab/ashfield-drive/blob/main/SPEC.md) 참고.\n",
     "contact": {
       "name": "ashfieldlab",
       "url": "https://github.com/ashfieldlab/ashfield-drive"
@@ -245,7 +245,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "휴지통 비우기 — soft-deleted 노드 전체 영구 삭제",
+        "summary": "휴지통 비우기: soft-deleted 노드 전체 영구 삭제",
         "description": "본인 personal soft-deleted + 회사 shared soft-deleted 노드를 hard delete + S3 object 제거.\n\n부모만 휴지통에 들어간 폴더의 자손 파일들도 RECURSIVE CTE 로 펼쳐 S3 object 까지 제거.\nDB row 는 FK ondelete=CASCADE 로 부모 hard-delete 시 자동 정리.\n\n공유 캘린더와 달리 회사 공유 폴더/파일도 누구든 비울 수 있다 (휴지통은 회사 단위 공통).",
         "operationId": "empty_trash_api_v1_nodes_trash_delete",
         "security": [
@@ -294,7 +294,7 @@
           "nodes"
         ],
         "summary": "공유받은 노드 목록",
-        "description": "본인이 직접 grantee 인 `FileShare` 의 노드 (ancestor 상속은 제외 — 거기엔 자손이 함께 노출되므로 중복).\n\nexpired share 는 제외.",
+        "description": "본인이 직접 grantee 인 `FileShare` 의 노드 (ancestor 상속은 제외: 거기엔 자손이 함께 노출되므로 중복).\n\nexpired share 는 제외.",
         "operationId": "get_shared_with_me_api_v1_nodes_shared_with_me_get",
         "security": [
           {
@@ -341,8 +341,8 @@
         "tags": [
           "nodes"
         ],
-        "summary": "Desktop sync — delta polling. since 이후 변경분.",
-        "description": "Desktop sync 클라이언트 의 delta polling endpoint (ADR-0015).\n\n`audit_logs` 의 entity_type='node' 변경을 since 이후로 가져옴.\n권한 layer: scope=shared (회사 멤버 모두) / scope=personal owner / FileShare direct grantee.\nAncestor share 상속은 Phase 4 (지금은 direct share 만).\n\nlimit 초과 시 has_more=true — 클라이언트가 마지막 occurred_at 으로 다시 호출.",
+        "summary": "Desktop sync: delta polling. since 이후 변경분.",
+        "description": "Desktop sync 클라이언트 의 delta polling endpoint (ADR-0015).\n\n`audit_logs` 의 entity_type='node' 변경을 since 이후로 가져옴.\n권한 layer: scope=shared (회사 멤버 모두) / scope=personal owner / FileShare direct grantee.\nAncestor share 상속은 Phase 4 (지금은 direct share 만).\n\nlimit 초과 시 has_more=true: 클라이언트가 마지막 occurred_at 으로 다시 호출.",
         "operationId": "get_changes_api_v1_nodes_changes_get",
         "security": [
           {
@@ -414,7 +414,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "조상 체인 — root 부터 leaf 까지 순서",
+        "summary": "조상 체인: root 부터 leaf 까지 순서",
         "description": "브레드크럼용. leaf 자신 포함, root → leaf 순서.",
         "operationId": "get_ancestors_api_v1_nodes__node_id__ancestors_get",
         "security": [
@@ -536,7 +536,7 @@
           "nodes"
         ],
         "summary": "이름 변경 / 이동",
-        "description": "필드만 보낸 것만 변경. parent_id 변경 시 사이클·scope 일관 검사.\n\nDesktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교 — mismatch 시 412.",
+        "description": "필드만 보낸 것만 변경. parent_id 변경 시 사이클·scope 일관 검사.\n\nDesktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교: mismatch 시 412.",
         "operationId": "patch_node_api_v1_nodes__node_id__patch",
         "security": [
           {
@@ -626,7 +626,7 @@
           "nodes"
         ],
         "summary": "휴지통 이동 (soft delete)",
-        "description": "soft delete — `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.\n\n진행 중 multipart 업로드는 S3 abort 시도 후 계속.\nDesktop sync 의 If-Match 헤더 검증.",
+        "description": "soft delete: `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.\n\n진행 중 multipart 업로드는 S3 abort 시도 후 계속.\nDesktop sync 의 If-Match 헤더 검증.",
         "operationId": "delete_node_api_v1_nodes__node_id__delete",
         "security": [
           {
@@ -760,7 +760,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "업로드 시작 — presigned URL 발급",
+        "summary": "업로드 시작: presigned URL 발급",
         "description": "`size` 가 50MB(`multipart_threshold_bytes`) 이상이면 multipart 흐름으로 분기.\n\n응답 분기:\n  - 단일 PUT: `upload_url` 에 직접 PUT → `/complete`\n  - multipart=true: `upload_id`, `part_size` 사용 →\n    `POST /{id}/parts/{n}/url` 로 part 별 URL → `/complete-multipart` 에 ETag 리스트\n\nNodeRow 는 status=pending 으로 즉시 생성. /complete 호출까지는 휴지통/트리에 노출 X.",
         "operationId": "create_upload_url_api_v1_nodes_upload_url_post",
         "security": [
@@ -899,8 +899,8 @@
         "tags": [
           "nodes"
         ],
-        "summary": "Multipart: 완료 — CompleteMultipartUpload",
-        "description": "parts = [{PartNumber, ETag}, ...] — 모든 파트 PUT 후 호출.\n\n실패 시 S3 측 multipart abort 시도 후 400. status → ready 로 전이 + audit row.",
+        "summary": "Multipart: 완료: CompleteMultipartUpload",
+        "description": "parts = [{PartNumber, ETag}, ...]: 모든 파트 PUT 후 호출.\n\n실패 시 S3 측 multipart abort 시도 후 400. status → ready 로 전이 + audit row.",
         "operationId": "complete_multipart_api_v1_nodes__node_id__complete_multipart_post",
         "security": [
           {
@@ -972,7 +972,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "단일 PUT 완료 — head_object 로 확인 후 ready 전이",
+        "summary": "단일 PUT 완료: head_object 로 확인 후 ready 전이",
         "operationId": "complete_upload_api_v1_nodes__node_id__complete_post",
         "security": [
           {
@@ -1014,7 +1014,7 @@
             "description": "S3 에 객체가 아직 없음 (PUT 미완료)"
           },
           "409": {
-            "description": "multipart 노드 — `/complete-multipart` 사용해야 함"
+            "description": "multipart 노드: `/complete-multipart` 사용해야 함"
           },
           "422": {
             "description": "Validation Error",
@@ -1034,8 +1034,8 @@
         "tags": [
           "nodes"
         ],
-        "summary": "내용 교체 시작 — 기존 file 노드에 새 내용 presigned URL",
-        "description": "Desktop sync (ADR-0015) 의 수정 업로드 경로.\n\nwrite-to-new-key + swap: 새 내용은 별도 S3 key (`pending_storage_key`) 로\n올라가고 `/overwrite-complete` 에서 승격. 업로드 실패가 현재 내용을 깨뜨리지\n않음. If-Match 로 optimistic locking — 412 면 클라이언트가 충돌 사본 생성.\n\n이미 진행 중인 교체가 있으면 새 교체가 그것을 대체 (옛 pending key 는 고아 —\ncron 정리 대상, 기능 영향 없음).",
+        "summary": "내용 교체 시작: 기존 file 노드에 새 내용 presigned URL",
+        "description": "Desktop sync (ADR-0015) 의 수정 업로드 경로.\n\nwrite-to-new-key + swap: 새 내용은 별도 S3 key (`pending_storage_key`) 로\n올라가고 `/overwrite-complete` 에서 승격. 업로드 실패가 현재 내용을 깨뜨리지\n않음. If-Match 로 optimistic locking: 412 면 클라이언트가 충돌 사본 생성.\n\n이미 진행 중인 교체가 있으면 새 교체가 그것을 대체 (옛 pending key 는 고아 , \ncron 정리 대상, 기능 영향 없음).",
         "operationId": "create_overwrite_url_api_v1_nodes__node_id__overwrite_url_post",
         "security": [
           {
@@ -1132,7 +1132,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "내용 교체 완료 — 새 key 승격 + 옛 객체 삭제",
+        "summary": "내용 교체 완료: 새 key 승격 + 옛 객체 삭제",
         "description": "단일 PUT 은 body 없이, multipart 는 parts 리스트와 함께 호출.",
         "operationId": "complete_overwrite_api_v1_nodes__node_id__overwrite_complete_post",
         "security": [
@@ -1319,7 +1319,7 @@
             }
           },
           "400": {
-            "description": "파일 노드 — `/download-url` 사용"
+            "description": "파일 노드: `/download-url` 사용"
           },
           "413": {
             "description": "200MB 또는 500 files 한도 초과"
@@ -1598,7 +1598,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "외부 링크 발급 — 인증 없이 `/s/{token}` 으로 접근 가능",
+        "summary": "외부 링크 발급: 인증 없이 `/s/{token}` 으로 접근 가능",
         "operationId": "create_external_link_api_v1_nodes__node_id__external_links_post",
         "security": [
           {
@@ -1670,7 +1670,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "외부 링크 철회 — `revoked_at` 세팅",
+        "summary": "외부 링크 철회: `revoked_at` 세팅",
         "operationId": "revoke_external_link_api_v1_nodes__node_id__external_links__link_id__delete",
         "security": [
           {
@@ -1894,7 +1894,7 @@
             }
           },
           "403": {
-            "description": "write 권한 없음 — personal 의 owner 아님"
+            "description": "write 권한 없음: personal 의 owner 아님"
           },
           "404": {
             "description": "없거나 다른 회사"
@@ -2099,7 +2099,7 @@
           "calendars"
         ],
         "summary": "외부 ICS 재동기화 (wipe-and-reload)",
-        "description": "외부 ICS 캘린더 재동기화 — owner 또는 admin 만.",
+        "description": "외부 ICS 캘린더 재동기화: owner 또는 admin 만.",
         "operationId": "refresh_calendar_api_v1_calendars__calendar_id__refresh_post",
         "security": [
           {
@@ -2164,7 +2164,7 @@
         "tags": [
           "calendars"
         ],
-        "summary": "ICS 파일 1회성 import — 파일은 보관하지 않음",
+        "summary": "ICS 파일 1회성 import: 파일은 보관하지 않음",
         "description": "업로드된 .ics 파일의 master VEVENT 들을 캘린더에 적재. 파일 자체는 저장 안 함.",
         "operationId": "import_ics_api_v1_calendars__calendar_id__import_ics_post",
         "security": [
@@ -2394,7 +2394,7 @@
         "tags": [
           "calendars"
         ],
-        "summary": "ICS subscription 토큰 회전 — 기존 URL 즉시 무효",
+        "summary": "ICS subscription 토큰 회전: 기존 URL 즉시 무효",
         "operationId": "rotate_subscription_api_v1_calendars__calendar_id__subscription_rotate_post",
         "security": [
           {
@@ -2584,7 +2584,7 @@
             }
           },
           "422": {
-            "description": "external_ics 캘린더 — read-only"
+            "description": "external_ics 캘린더: read-only"
           },
           "400": {
             "description": "end_at < start_at"
@@ -2601,7 +2601,7 @@
           "events"
         ],
         "summary": ".ics 단건 다운로드 (RFC 5545)",
-        "description": "단건 .ics 다운로드 — RFC 5545. master + RRULE + EXDATE 그대로 export.",
+        "description": "단건 .ics 다운로드: RFC 5545. master + RRULE + EXDATE 그대로 export.",
         "operationId": "export_event_ics_api_v1_events__event_id__ics_get",
         "security": [
           {
@@ -2810,10 +2810,10 @@
                   "type": "null"
                 }
               ],
-              "description": "ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리 — series 유지.",
+              "description": "ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리: series 유지.",
               "title": "Occurrence"
             },
-            "description": "ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리 — series 유지."
+            "description": "ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리: series 유지."
           },
           {
             "name": "X-Active-Company-Id",
@@ -2900,7 +2900,7 @@
         "tags": [
           "events"
         ],
-        "summary": "초대 추가 — 작성자/캘린더 owner 만",
+        "summary": "초대 추가: 작성자/캘린더 owner 만",
         "operationId": "create_invitation_api_v1_events__event_id__invitations_post",
         "security": [
           {
@@ -3051,7 +3051,7 @@
         "tags": [
           "events"
         ],
-        "summary": "초대 제거 — 작성자/owner 만",
+        "summary": "초대 제거: 작성자/owner 만",
         "operationId": "delete_invitation_api_v1_events__event_id__invitations__invitation_id__delete",
         "security": [
           {
@@ -3554,7 +3554,7 @@
         "tags": [
           "webhooks"
         ],
-        "summary": "endpoint 등록 — secret 생성·1회 노출",
+        "summary": "endpoint 등록: secret 생성·1회 노출",
         "operationId": "create_endpoint_api_v1_webhooks_post",
         "security": [
           {
@@ -3584,7 +3584,7 @@
         },
         "responses": {
           "201": {
-            "description": "응답 body 의 `secret` 은 이 호출에서만 노출됨 — 클라이언트가 저장 책임",
+            "description": "응답 body 의 `secret` 은 이 호출에서만 노출됨: 클라이언트가 저장 책임",
             "content": {
               "application/json": {
                 "schema": {
@@ -3928,7 +3928,7 @@
           "company"
         ],
         "summary": "회사 멤버 자동완성 검색",
-        "description": "active company 멤버 ILIKE 검색 — email · name 매칭. 본인은 결과에서 제외.\n\nq 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).\n캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.",
+        "description": "active company 멤버 ILIKE 검색: email · name 매칭. 본인은 결과에서 제외.\n\nq 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).\n캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.",
         "operationId": "search_members_api_v1_me_company_members_get",
         "security": [
           {
@@ -4076,7 +4076,7 @@
         "tags": [
           "admin"
         ],
-        "summary": "멤버 role 변경 — admin 임명/강등 (System Admin)",
+        "summary": "멤버 role 변경: admin 임명/강등 (System Admin)",
         "operationId": "patch_member_role_api_v1_admin_companies__company_id__members__user_sub__patch",
         "security": [
           {
@@ -4125,7 +4125,7 @@
             }
           },
           "404": {
-            "description": "멤버십 없음 — 그 사용자가 그 회사로 한 번도 로그인 안 함"
+            "description": "멤버십 없음: 그 사용자가 그 회사로 한 번도 로그인 안 함"
           },
           "409": {
             "description": "마지막 admin 강등 시도 (운영 lock-out 방지)"
@@ -4423,7 +4423,7 @@
         "tags": [
           "company"
         ],
-        "summary": "회사 SMTP override 삭제 — 전역 SMTP 사용으로 복귀 (Company Admin)",
+        "summary": "회사 SMTP override 삭제: 전역 SMTP 사용으로 복귀 (Company Admin)",
         "operationId": "delete_company_smtp_api_v1_companies__company_id__smtp_delete",
         "security": [
           {
@@ -5476,7 +5476,7 @@
         "tags": [
           "company"
         ],
-        "summary": "이메일 템플릿 단건 — 현재 active (override 또는 기본)",
+        "summary": "이메일 템플릿 단건: 현재 active (override 또는 기본)",
         "operationId": "get_template_api_v1_companies__company_id__email_templates__event_type__get",
         "security": [
           {
@@ -5594,7 +5594,7 @@
         "tags": [
           "company"
         ],
-        "summary": "회사 override 삭제 — 시스템 기본 사용으로 복귀",
+        "summary": "회사 override 삭제: 시스템 기본 사용으로 복귀",
         "operationId": "delete_template_api_v1_companies__company_id__email_templates__event_type__delete",
         "security": [
           {
@@ -5643,7 +5643,7 @@
         "tags": [
           "company"
         ],
-        "summary": "템플릿 미리보기 — 샘플 변수로 렌더링",
+        "summary": "템플릿 미리보기: 샘플 변수로 렌더링",
         "operationId": "preview_template_api_v1_companies__company_id__email_templates__event_type__preview_post",
         "security": [
           {
@@ -5754,7 +5754,7 @@
         "tags": [
           "caldav"
         ],
-        "summary": "CalDAV 토큰 발급 — secret 평문은 응답에만",
+        "summary": "CalDAV 토큰 발급: secret 평문은 응답에만",
         "operationId": "create_token_api_v1_me_caldav_tokens_post",
         "security": [
           {
@@ -5811,7 +5811,7 @@
         "tags": [
           "caldav"
         ],
-        "summary": "CalDAV 토큰 폐기 — 즉시 무효",
+        "summary": "CalDAV 토큰 폐기: 즉시 무효",
         "operationId": "revoke_token_api_v1_me_caldav_tokens__token_id__delete",
         "security": [
           {
@@ -5918,7 +5918,7 @@
         "tags": [
           "onlyoffice"
         ],
-        "summary": "OnlyOffice 가 호출 — 토큰으로 식별된 파일의 binary 반환",
+        "summary": "OnlyOffice 가 호출: 토큰으로 식별된 파일의 binary 반환",
         "operationId": "serve_file_api_v1_onlyoffice_files__token__get",
         "parameters": [
           {
@@ -5958,7 +5958,7 @@
         "tags": [
           "onlyoffice"
         ],
-        "summary": "OnlyOffice 의 저장 알림 — status 2/6 시 본문 fetch 후 우리 S3 갱신",
+        "summary": "OnlyOffice 의 저장 알림: status 2/6 시 본문 fetch 후 우리 S3 갱신",
         "operationId": "callback_api_v1_onlyoffice_callback__token__post",
         "parameters": [
           {
@@ -6156,7 +6156,7 @@
         "tags": [
           "public-booking"
         ],
-        "summary": "예약 제출 (즉시 등록 — ADR-0012)",
+        "summary": "예약 제출 (즉시 등록: ADR-0012)",
         "operationId": "submit_booking_api_public_v1_booking__public_key__submit_post",
         "parameters": [
           {
@@ -6370,7 +6370,7 @@
         "tags": [
           "external"
         ],
-        "summary": "공개 링크 메타 — 인증 불필요",
+        "summary": "공개 링크 메타: 인증 불필요",
         "operationId": "public_link_meta_s__token__get",
         "parameters": [
           {
@@ -6477,7 +6477,7 @@
           "meta"
         ],
         "summary": "헬스 체크",
-        "description": "LB/cron 용. 인증 불필요. 항상 `{\"status\": \"ok\"}` 반환.\n\nDB 연결 실패해도 200 — DB 의존 핸들러에서 별도 503 응답.",
+        "description": "LB/cron 용. 인증 불필요. 항상 `{\"status\": \"ok\"}` 반환.\n\nDB 연결 실패해도 200: DB 의존 핸들러에서 별도 503 응답.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -8014,7 +8014,7 @@
           "variables"
         ],
         "title": "EmailTemplateItem",
-        "description": "리스트 응답의 한 행 — 어떤 event_type 이 커스텀돼 있는지."
+        "description": "리스트 응답의 한 행: 어떤 event_type 이 커스텀돼 있는지."
       },
       "EmailTemplateListResponse": {
         "properties": {
@@ -8429,7 +8429,7 @@
           "is_recurring"
         ],
         "title": "EventOccurrence",
-        "description": "Expanded occurrence — 마스터 event 의 한 발생.\n\nseries 식별자는 event_id (불변), occurrence 식별자는 start_at (ISO)."
+        "description": "Expanded occurrence: 마스터 event 의 한 발생.\n\nseries 식별자는 event_id (불변), occurrence 식별자는 start_at (ISO)."
       },
       "EventPatch": {
         "properties": {
@@ -9482,7 +9482,7 @@
           "title"
         ],
         "title": "PublicBookingResponse",
-        "description": "제출 직후 응답 — 예약자에게 보여줄 정보 + cancel 링크용 token."
+        "description": "제출 직후 응답: 예약자에게 보여줄 정보 + cancel 링크용 token."
       },
       "PublicBookingSubmit": {
         "properties": {
@@ -9611,7 +9611,7 @@
           "organization_name"
         ],
         "title": "PublicBookingTypeResponse",
-        "description": "공개 표시 — 운영자 신원 노출 X."
+        "description": "공개 표시: 운영자 신원 노출 X."
       },
       "PublicDownloadRequest": {
         "properties": {

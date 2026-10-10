@@ -1,30 +1,30 @@
 //! Windows Cloud Files API (Files On-Demand VFS).
 //!
-//! E1: sync root 등록/해제 — 폴더를 OS 의 "cloud provider 영역" 으로.
+//! E1: sync root 등록/해제: 폴더를 OS 의 "cloud provider 영역" 으로.
 //! E2+: placeholder 생성, hydration callback (후속 chunk).
 //!
-//! Windows 전용 — 다른 OS 에선 stub 이 명시적 에러 반환.
+//! Windows 전용: 다른 OS 에선 stub 이 명시적 에러 반환.
 //! 참고: Microsoft CloudMirror sample + ADR-0015.
 
 use serde::Deserialize;
 
-/// JS 가 보내는 placeholder 파일 메타 — node tree 의 평탄화 결과.
+/// JS 가 보내는 placeholder 파일 메타: node tree 의 평탄화 결과.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceholderFile {
     /// base_dir 기준 상대 폴더 ("" = base 바로 아래, "a\\b" 등)
     pub relative_dir: String,
     pub name: String,
-    /// backend node id — hydration callback 에서 어떤 파일인지 식별 (FileIdentity)
+    /// backend node id: hydration callback 에서 어떤 파일인지 식별 (FileIdentity)
     pub node_id: String,
-    /// 회사 ID — download-url 호출의 X-Active-Company-Id (FileIdentity 에 함께 인코딩)
+    /// 회사 ID: download-url 호출의 X-Active-Company-Id (FileIdentity 에 함께 인코딩)
     pub company_id: String,
     pub size: i64,
-    /// epoch millis (UTC) — updated_at
+    /// epoch millis (UTC): updated_at
     pub mtime_ms: i64,
 }
 
-/// hydration 이 backend 를 부를 때 쓰는 설정 — vfs_connect 가 주입.
+/// hydration 이 backend 를 부를 때 쓰는 설정: vfs_connect 가 주입.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectConfig {
@@ -54,9 +54,9 @@ mod imp {
     use super::{ConnectConfig, PlaceholderFile};
 
     // ---------------------------------------------------------------------
-    // Hydration 컨텍스트 — callback (OS 스레드) 이 backend 호출에 필요한 것들.
+    // Hydration 컨텍스트: callback (OS 스레드) 이 backend 호출에 필요한 것들.
     // OnceLock: 첫 connect 시 설정. access_token 은 oauth 모듈의 공용 캐시에서 받는다
-    // (refresh_token 회전 — VFS 가 따로 refresh 하면 JS/SSE 와 경쟁해 패밀리가 폐기된다).
+    // (refresh_token 회전: VFS 가 따로 refresh 하면 JS/SSE 와 경쟁해 패밀리가 폐기된다).
     // ---------------------------------------------------------------------
     struct HydrationCtx {
         config: ConnectConfig,
@@ -96,10 +96,10 @@ mod imp {
         let key = Key::<Aes256Gcm>::from_slice(dek);
         let cipher = Aes256Gcm::new(key);
         let nonce = Nonce::from_slice(&data[..12]); // iv
-        // data[12..] = ciphertext || tag — aes-gcm 의 detached-less decrypt 입력
+        // data[12..] = ciphertext || tag: aes-gcm 의 detached-less decrypt 입력
         cipher
             .decrypt(nonce, &data[12..])
-            .map_err(|_| "AES-GCM 복호화 실패 (tag 불일치 — 키/내용 무결성)".to_string())
+            .map_err(|_| "AES-GCM 복호화 실패 (tag 불일치: 키/내용 무결성)".to_string())
     }
 
     #[derive(serde::Deserialize)]
@@ -107,13 +107,13 @@ mod imp {
         url: String,
     }
 
-    /// 유효한 access token (blocking — worker 스레드 전용). refresh 는 oauth 모듈이 직렬화.
+    /// 유효한 access token (blocking: worker 스레드 전용). refresh 는 oauth 모듈이 직렬화.
     fn get_access_token(stale: Option<&str>) -> Result<String, String> {
         crate::oauth::access_token_blocking(stale)
     }
 
     // ---------------------------------------------------------------------
-    // FETCH_DATA callback — OS 가 placeholder 첫 접근 시 호출.
+    // FETCH_DATA callback: OS 가 placeholder 첫 접근 시 호출.
     // 즉시 반환해야 하므로 다운로드는 worker 스레드에서.
     // ---------------------------------------------------------------------
     unsafe extern "system" fn on_fetch_data(
@@ -133,7 +133,7 @@ mod imp {
 
         // hydrate 는 CfExecute 로 파일에 내용을 쓴다 → watcher 가 modify 로 잡음.
         // 그 경로를 self-write 로 등록해 업로드 무한루프를 막는다.
-        // PCWSTR deref 는 null 이면 access violation — 반드시 가드.
+        // PCWSTR deref 는 null 이면 access violation: 반드시 가드.
         let read_pcwstr = |p: windows::core::PCWSTR| -> String {
             if p.is_null() {
                 String::new()
@@ -155,14 +155,14 @@ mod imp {
         std::thread::spawn(move || {
             let result =
                 hydrate(identity, connection_key, transfer_key, request_key, file_size);
-            // 완료(성공/실패 무관) — 유예만 남기고 self-write 억제 해제.
+            // 완료(성공/실패 무관): 유예만 남기고 self-write 억제 해제.
             // 다운로드가 오래 걸려도 그 사이 쓰기 이벤트는 begin~end 로 계속 무시됨.
             if !log_path.is_empty() {
                 crate::watcher::self_write_end(std::path::Path::new(&log_path));
             }
             if let Err(e) = result {
                 eprintln!("[vfs] hydrate 실패 [{log_path}]: {e}");
-                // 실패 통지 — OS 가 응용에 에러 반환, 탐색기 hang 방지
+                // 실패 통지: OS 가 응용에 에러 반환, 탐색기 hang 방지
                 transfer_error(connection_key, transfer_key, request_key, file_size);
             }
         });
@@ -208,7 +208,7 @@ mod imp {
         request_key: i64,
         file_size: i64,
     ) {
-        // 에러 통지 — Length 는 전체 요청 범위
+        // 에러 통지: Length 는 전체 요청 범위
         let op_info = CF_OPERATION_INFO {
             StructSize: std::mem::size_of::<CF_OPERATION_INFO>() as u32,
             Type: CF_OPERATION_TYPE_TRANSFER_DATA,
@@ -230,7 +230,7 @@ mod imp {
         }
     }
 
-    /// 다운로드 + OS 로 전달. 1MB 단위 스트리밍 — 큰 파일도 메모리 안 부풂.
+    /// 다운로드 + OS 로 전달. 1MB 단위 스트리밍: 큰 파일도 메모리 안 부풂.
     fn hydrate(
         identity: Vec<u8>,
         connection_key: CF_CONNECTION_KEY,
@@ -242,11 +242,11 @@ mod imp {
         let identity = String::from_utf8(identity).map_err(|_| "identity utf8 아님")?;
         let (company, node_id) = identity
             .split_once('\n')
-            .ok_or("identity 형식 오류 (재 populate 필요 — 옛 placeholder)")?;
+            .ok_or("identity 형식 오류 (재 populate 필요: 옛 placeholder)")?;
 
         let client = reqwest::blocking::Client::new();
 
-        // 1. presigned URL — 401 이면 토큰 갱신 후 한 번 재시도
+        // 1. presigned URL: 401 이면 토큰 갱신 후 한 번 재시도
         let download_url = |token: &str| {
             client
                 .post(format!(
@@ -280,7 +280,7 @@ mod imp {
 
         const CHUNK: usize = 1024 * 1024; // 4KB 정렬 배수 필수 (마지막 chunk 제외)
 
-        // 2-E. E2E vault 파일 — whole-file AES-GCM 은 부분 복호화 불가.
+        // 2-E. E2E vault 파일: whole-file AES-GCM 은 부분 복호화 불가.
         // 전체 암호문을 메모리에 받아 한 번에 복호화 후, 평문을 1MB 단위 전달.
         // placeholder FileSize 는 평문 크기(size_bytes-28)로 만들어 둠 → 길이 일치.
         if let Some(dek) = dek_for(node_id) {
@@ -288,7 +288,7 @@ mod imp {
             let plain = aes_gcm_decrypt(&dek, &body)?;
             let mut offset = 0usize;
             if plain.is_empty() {
-                // 0바이트 평문 — 빈 전송으로 완료 통지
+                // 0바이트 평문: 빈 전송으로 완료 통지
                 transfer_chunk(connection_key, transfer_key, request_key, &[], 0, true)?;
             }
             while offset < plain.len() {
@@ -306,7 +306,7 @@ mod imp {
             return Ok(());
         }
 
-        // 2-N. 일반(비암호화) 파일 — 스트리밍 1MB 단위 CfExecute
+        // 2-N. 일반(비암호화) 파일: 스트리밍 1MB 단위 CfExecute
         use std::io::Read;
         let mut buf = vec![0u8; CHUNK];
         let mut filled = 0usize;
@@ -319,7 +319,7 @@ mod imp {
                 if filled > 0 {
                     transfer_chunk(connection_key, transfer_key, request_key, &buf[..filled], offset, true)?;
                 } else if offset == 0 {
-                    // 0바이트 파일 — 아무것도 전송 안 하면 placeholder 가 dehydrated(x)로
+                    // 0바이트 파일: 아무것도 전송 안 하면 placeholder 가 dehydrated(x)로
                     // 남는다. 빈 전송으로 완료 통지 (vault 0바이트 경로와 동일).
                     transfer_chunk(connection_key, transfer_key, request_key, &[], 0, true)?;
                 }
@@ -335,7 +335,7 @@ mod imp {
         Ok(())
     }
 
-    // FETCH_DATA 만 등록 — 테이블은 connect 동안 유효해야 하므로 static.
+    // FETCH_DATA 만 등록: 테이블은 connect 동안 유효해야 하므로 static.
     static CALLBACK_TABLE: [CF_CALLBACK_REGISTRATION; 2] = [
         CF_CALLBACK_REGISTRATION {
             Type: CF_CALLBACK_TYPE_FETCH_DATA,
@@ -348,7 +348,7 @@ mod imp {
     ];
 
     pub fn connect(sync_root: &str, config: ConnectConfig) -> Result<(), String> {
-        // 이미 이 프로세스가 연결돼 있으면 멱등 — 재연결 안 함 (dev HMR 재호출).
+        // 이미 이 프로세스가 연결돼 있으면 멱등: 재연결 안 함 (dev HMR 재호출).
         // 같은 프로세스라 callback 테이블도 동일하므로 hydration 정상.
         if CONNECTION.lock().unwrap().is_some() {
             return Ok(());
@@ -369,9 +369,9 @@ mod imp {
                 Ok(())
             }
             // 0x8007017A = 이미 다른(이전 프로세스) 연결이 살아있음. 우리 callback
-            // 으로는 못 잡지만 재연결 불가 — 일단 통과시키고 다음 재시작에서 정리.
+            // 으로는 못 잡지만 재연결 불가: 일단 통과시키고 다음 재시작에서 정리.
             Err(e) if e.code().0 as u32 == 0x8007_017A => {
-                eprintln!("[vfs] sync root 이미 연결됨 (이전 세션 잔존) — 통과");
+                eprintln!("[vfs] sync root 이미 연결됨 (이전 세션 잔존): 통과");
                 Ok(())
             }
             Err(e) => Err(format!("CfConnectSyncRoot 실패: {e}")),
@@ -386,7 +386,7 @@ mod imp {
         Ok(())
     }
 
-    // Provider 식별자 — 한 번 정하면 불변 (재설치 후에도 같은 sync root 인식).
+    // Provider 식별자: 한 번 정하면 불변 (재설치 후에도 같은 sync root 인식).
     // uuidgen 으로 생성한 고정값.
     const PROVIDER_ID: GUID = GUID::from_u128(0x6f1a5c7e_3b2d_4e8a_9c0f_d41b82a7e519);
 
@@ -433,7 +433,7 @@ mod imp {
     }
 
     pub fn unregister(sync_root: &str) -> Result<(), String> {
-        // CfUnregisterSyncRoot 는 경로 실존 필수 (없으면 0x80070002) — 폴더가
+        // CfUnregisterSyncRoot 는 경로 실존 필수 (없으면 0x80070002): 폴더가
         // 먼저 지워졌어도 등록 해제는 가능해야 하므로 임시 재생성.
         std::fs::create_dir_all(sync_root).ok();
         let path = HSTRING::from(sync_root);
@@ -451,14 +451,14 @@ mod imp {
         dirs: &[String],
         files: &[PlaceholderFile],
     ) -> Result<u32, String> {
-        // 0. base_dir 자체 — 회사/영역 폴더. 루트 바로 아래 파일만 있으면
+        // 0. base_dir 자체: 회사/영역 폴더. 루트 바로 아래 파일만 있으면
         //    dirs 가 비어서 이 폴더가 안 만들어지는 사고 (0x80070003)
         crate::watcher::mark_self_write(std::path::Path::new(base_dir));
         std::fs::create_dir_all(base_dir)
             .map_err(|e| format!("base 폴더 생성 실패 {base_dir}: {e}"))?;
 
         // 1. 폴더는 일반 디렉토리로 (placeholder 디렉토리는 Phase 2 검토).
-        //    self-write 등록 필수 — 안 그러면 watcher 가 우리 폴더 생성을 사용자
+        //    self-write 등록 필수: 안 그러면 watcher 가 우리 폴더 생성을 사용자
         //    생성으로 오인해 서버에 또 올리고 → 이름 충돌 "(2)","(3)"... 무한 증식.
         for d in dirs {
             let dir_path = std::path::Path::new(base_dir).join(d)
@@ -468,12 +468,12 @@ mod imp {
                 .map_err(|e| format!("폴더 생성 실패 {d}: {e}"))?;
         }
 
-        // 2. 파일 placeholder — 같은 부모 폴더끼리 묶어 CfCreatePlaceholders 호출
+        // 2. 파일 placeholder: 같은 부모 폴더끼리 묶어 CfCreatePlaceholders 호출
         use std::collections::HashMap;
         let mut by_dir: HashMap<&str, Vec<&PlaceholderFile>> = HashMap::new()
 ;
         for f in files {
-            // 이미 디스크에 있으면 skip — 재실행 idempotent
+            // 이미 디스크에 있으면 skip: 재실행 idempotent
             let full = std::path::Path::new(base_dir)
                 .join(&f.relative_dir)
                 .join(&f.name);
@@ -492,7 +492,7 @@ mod imp {
 
             // wide string / identity 버퍼는 CfCreatePlaceholders 호출까지 살아있어야 함
             let names: Vec<HSTRING> = group.iter().map(|f| HSTRING::from(f.name.as_str())).collect();
-            // FileIdentity = "회사ID\n노드ID" — hydration 의 download-url 호출에 둘 다 필요
+            // FileIdentity = "회사ID\n노드ID": hydration 의 download-url 호출에 둘 다 필요
             let identities: Vec<String> = group
                 .iter()
                 .map(|f| format!("{}\n{}", f.company_id, f.node_id))
@@ -581,7 +581,7 @@ pub fn vfs_populate(
 
 /// E2E vault DEK 등록 (ADR-0016 V5b). deks: node_id → base64(raw 32B AES 키).
 /// JS 가 잠금해제 시 wrapped_dek 을 vault_key 로 풀어 raw 로 보냄. 매 호출이
-/// 맵 전체를 교체 — 잠김/로그아웃 시 빈 맵을 보내 폐기. hydrate 콜백이 사전
+/// 맵 전체를 교체: 잠김/로그아웃 시 빈 맵을 보내 폐기. hydrate 콜백이 사전
 /// 적재된 키로 즉시 복호화하도록 함.
 #[tauri::command]
 pub fn vfs_set_deks(deks: std::collections::HashMap<String, String>) -> Result<(), String> {
@@ -634,10 +634,10 @@ pub fn vfs_encrypt_to_temp(src: String, dek: String) -> Result<String, String> {
     Ok(tmp.to_string_lossy().into_owned())
 }
 
-/// 회사 폴더 통째 제거 — sync 제외 toggle 시. 없으면 무시.
+/// 회사 폴더 통째 제거: sync 제외 toggle 시. 없으면 무시.
 #[tauri::command]
 pub fn vfs_remove_dir(path: String) -> Result<(), String> {
-    // 우리(reconcile) 의 삭제 — watcher 가 delete 로 잡아 서버 삭제로 되돌리지
+    // 우리(reconcile) 의 삭제: watcher 가 delete 로 잡아 서버 삭제로 되돌리지
     // 않도록 self-write 등록.
     crate::watcher::mark_self_write(std::path::Path::new(&path));
     match std::fs::remove_dir_all(&path) {
@@ -648,7 +648,7 @@ pub fn vfs_remove_dir(path: String) -> Result<(), String> {
 }
 
 /// dir 안에서 allowed 에 없는 항목 전부 제거 (재귀). desired 상태로 강제 수렴.
-/// vault 폴더 한정 사용 — 재시작/이름변경/잠금토글로 남은 잔재 placeholder 정리.
+/// vault 폴더 한정 사용: 재시작/이름변경/잠금토글로 남은 잔재 placeholder 정리.
 /// allowed 에는 살릴 파일+중간 폴더 경로가 모두 들어와야 함 (소문자 비교).
 #[tauri::command]
 pub fn vfs_prune(dir: String, allowed: Vec<String>) -> Result<u32, String> {
@@ -671,7 +671,7 @@ pub fn vfs_prune(dir: String, allowed: Vec<String>) -> Result<u32, String> {
             let key = p.to_string_lossy().to_lowercase();
             if allow.contains(&key) {
                 if p.is_dir() {
-                    walk(&p, allow, out); // 살릴 폴더 — 안쪽 계속 검사
+                    walk(&p, allow, out); // 살릴 폴더: 안쪽 계속 검사
                 }
             } else {
                 out.push(p); // 제거 대상 (폴더면 통째)
@@ -697,8 +697,8 @@ pub fn vfs_prune(dir: String, allowed: Vec<String>) -> Result<u32, String> {
 }
 
 /// 로컬 파일 삭제 (placeholder 든 hydrate 된 파일이든 일반 삭제로 동작).
-/// 없는 파일은 무시 — polling diff 가 중복 호출해도 안전.
-/// 우리의 reconcile 삭제이므로 self-write 등록 — watcher 가 잡아 서버 삭제로
+/// 없는 파일은 무시: polling diff 가 중복 호출해도 안전.
+/// 우리의 reconcile 삭제이므로 self-write 등록: watcher 가 잡아 서버 삭제로
 /// 되돌리는 사고 방지 (서버→로컬 삭제가 로컬→서버 삭제로 바운스).
 #[tauri::command]
 pub fn vfs_delete(paths: Vec<String>) -> Result<u32, String> {
@@ -714,9 +714,9 @@ pub fn vfs_delete(paths: Vec<String>) -> Result<u32, String> {
     Ok(removed)
 }
 
-/// 충돌 사본 생성 — 412(동시 수정) 시 로컬 버전을 별도 파일로 보존.
+/// 충돌 사본 생성: 412(동시 수정) 시 로컬 버전을 별도 파일로 보존.
 /// `foo.docx` → `foo (충돌본 {date} {hostname}).docx`. self-write 등록 후 복사
-/// (watcher 의 create 무시 — JS 가 명시적으로 업로드). 생성 경로 반환.
+/// (watcher 의 create 무시: JS 가 명시적으로 업로드). 생성 경로 반환.
 #[tauri::command]
 pub fn vfs_make_conflict_copy(path: String, date: String) -> Result<String, String> {
     let src = std::path::Path::new(&path);
@@ -747,7 +747,7 @@ pub fn vfs_disconnect() -> Result<(), String> {
     imp::disconnect()
 }
 
-/// 로컬 파일 메타데이터 — modify 이벤트가 진짜 내용 변경인지 판정용.
+/// 로컬 파일 메타데이터: modify 이벤트가 진짜 내용 변경인지 판정용.
 /// 내용을 읽지 않으므로 대용량(수십 GB)도 즉시, placeholder 도 하이드레이트 안 함.
 ///   - size/mtime 이 직전 동기화 값과 같으면 내용 불변 → 에코(ADS 변경 등) skip.
 ///   - dehydrated(placeholder) 면 로컬 편집이 불가능하므로 무조건 skip.
@@ -798,7 +798,7 @@ pub fn vfs_file_size(path: String) -> Result<u64, String> {
         .map_err(|e| format!("stat {path}: {e}"))
 }
 
-/// 로컬 파일을 presigned PUT URL 로 업로드 (F2, 단일 PUT — 50MB 미만).
+/// 로컬 파일을 presigned PUT URL 로 업로드 (F2, 단일 PUT: 50MB 미만).
 /// content_type 미지정 (backend 가 mime=null 로 서명 → Content-Type 헤더 불요).
 #[tauri::command]
 pub async fn vfs_put_file(path: String, url: String) -> Result<(), String> {
@@ -817,7 +817,7 @@ pub async fn vfs_put_file(path: String, url: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 대용량 업로드 (A) — 파일의 [offset, offset+length) 범위를 읽어 파트 PUT.
+/// 대용량 업로드 (A): 파일의 [offset, offset+length) 범위를 읽어 파트 PUT.
 /// S3 가 응답 헤더로 준 ETag 반환 (complete-multipart 의 parts 에 필요).
 #[tauri::command]
 pub async fn vfs_put_file_part(

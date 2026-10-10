@@ -3,7 +3,7 @@
 //! sync 폴더를 파일시스템 watcher 로 감시 → 사용자 변경을 JS 로 emit.
 //! F1 은 감지/보고만. 실제 업로드는 F2.
 //!
-//! 핵심 난관 — "누가 바꿨나" 구별:
+//! 핵심 난관: "누가 바꿨나" 구별:
 //!   - 우리가 hydrate 로 쓴 것  → 무시 (안 그러면 업로드 무한루프)
 //!   - placeholder 메타만 (내용 0) → 무시
 //!   - 사용자가 hydrate 된 파일 수정/신규/삭제 → emit
@@ -23,30 +23,30 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 // hydrate 등 "우리가 쓰는 중" 인 경로 → 만료 시각. 그 경로 이벤트는 무시.
-// 키는 정규화 문자열 — Windows 의 `\\?\` verbatim 접두·대소문자 차이로 매치가
+// 키는 정규화 문자열: Windows 의 `\\?\` verbatim 접두·대소문자 차이로 매치가
 // 빗나가면 억제가 통째로 실패하므로(에코 업로드) norm() 으로 통일한다.
 static SELF_WRITES: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
-// hydration 진행 중 상한 — 완료 훅(self_write_end)이 유실돼도 이 시간 뒤엔 억제
+// hydration 진행 중 상한: 완료 훅(self_write_end)이 유실돼도 이 시간 뒤엔 억제
 // 해제(스톨·크래시 시 무한 억제 방지).
 const HYDRATE_MAX: Duration = Duration::from_secs(300);
-// 완료 후 유예 — 마지막 쓰기의 500ms 디바운스 + 지연 이벤트 흡수.
+// 완료 후 유예: 마지막 쓰기의 500ms 디바운스 + 지연 이벤트 흡수.
 const SELF_WRITE_GRACE: Duration = Duration::from_secs(3);
 
-/// 경로 정규화 — `\\?\` verbatim 접두 제거 + 소문자화(대소문자 무시 FS 대비).
+/// 경로 정규화: `\\?\` verbatim 접두 제거 + 소문자화(대소문자 무시 FS 대비).
 fn norm(path: &Path) -> String {
     let s = path.to_string_lossy();
     s.strip_prefix(r"\\?\").unwrap_or(&s).to_lowercase()
 }
 
-/// 빠른 self-write(placeholder 생성·삭제·rename 등) — 이후 몇 초간 그 경로 무시.
+/// 빠른 self-write(placeholder 생성·삭제·rename 등): 이후 몇 초간 그 경로 무시.
 pub fn mark_self_write(path: &Path) {
     let mut guard = SELF_WRITES.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
     map.insert(norm(path), Instant::now() + Duration::from_secs(10));
 }
 
-/// hydration 쓰기 시작 직전 호출 — 완료(self_write_end)까지 길게 억제.
+/// hydration 쓰기 시작 직전 호출: 완료(self_write_end)까지 길게 억제.
 /// 다운로드가 10초 넘게 걸려도(대용량·느린 회선) 완료 이벤트가 새지 않게 한다.
 // 호출부(vfs hydrate)가 windows-gated 라 non-windows 빌드에선 dead code.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -56,7 +56,7 @@ pub fn self_write_begin(path: &Path) {
     map.insert(norm(path), Instant::now() + HYDRATE_MAX);
 }
 
-/// hydration 완료(성공/실패 무관) 후 호출 — 유예 시간만 남기고 곧 만료.
+/// hydration 완료(성공/실패 무관) 후 호출: 유예 시간만 남기고 곧 만료.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn self_write_end(path: &Path) {
     let mut guard = SELF_WRITES.lock().unwrap();
@@ -65,7 +65,7 @@ pub fn self_write_end(path: &Path) {
     }
 }
 
-/// 편집기·OS 가 만드는 임시/잠금 파일 — sync 대상 아님.
+/// 편집기·OS 가 만드는 임시/잠금 파일: sync 대상 아님.
 fn is_ignored(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -113,7 +113,7 @@ pub fn start(app: AppHandle, root: &str) -> Result<(), String> {
     }
 
     let app_for_cb = app.clone();
-    // 500ms 디바운스 — 편집기가 한 저장에 여러 write 이벤트를 내는 것을 묶음
+    // 500ms 디바운스: 편집기가 한 저장에 여러 write 이벤트를 내는 것을 묶음
     let mut debouncer = new_debouncer(
         Duration::from_millis(500),
         None,
@@ -142,14 +142,14 @@ pub fn start(app: AppHandle, root: &str) -> Result<(), String> {
                 };
 
                 if is_self_write(&path) {
-                    continue; // 우리가 hydrate 로 쓴 것 — 무시
+                    continue; // 우리가 hydrate 로 쓴 것: 무시
                 }
                 if is_ignored(&path) {
                     continue; // 편집기 임시파일 등
                 }
 
                 let is_dir = path.is_dir();
-                // 폴더의 modify 는 자식 변경의 부수효과 (mtime 갱신) — 업로드 대상 아님.
+                // 폴더의 modify 는 자식 변경의 부수효과 (mtime 갱신): 업로드 대상 아님.
                 // 폴더는 create/delete/rename 만 의미 있음.
                 if is_dir && kind == "modify" {
                     continue;

@@ -23,7 +23,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        // 자동 시작 — Windows 시작 시 트레이로 조용히 (--minimized)
+        // 자동 시작: Windows 시작 시 트레이로 조용히 (--minimized)
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
@@ -31,7 +31,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // 트레이 메뉴 — 열기 / 종료
+            // 트레이 메뉴: 열기 / 종료
             let show = MenuItem::with_id(app, "show", "Ashfield Sync 열기", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -59,7 +59,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // 자동 시작 (idempotent). release 빌드만 등록 — debug 빌드는 UI 를
+            // 자동 시작 (idempotent). release 빌드만 등록: debug 빌드는 UI 를
             // dev 서버(localhost)에서 불러오므로 부팅 시 자동 실행되면 dev 서버가
             // 없어 빈 화면(ERR_CONNECTION_REFUSED). debug 에선 오히려 해제해
             // 기존에 잘못 등록된 dev 자동시작도 정리한다.
@@ -75,7 +75,7 @@ pub fn run() {
             }
             Ok(())
         })
-        // 창 닫기(✕) = 종료 대신 트레이로 숨김 (OneDrive 패턴 — 상주 유지).
+        // 창 닫기(✕) = 종료 대신 트레이로 숨김 (OneDrive 패턴: 상주 유지).
         // 진짜 종료는 트레이 메뉴 '종료'.
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

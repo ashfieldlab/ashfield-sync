@@ -91,7 +91,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * 휴지통 비우기 — soft-deleted 노드 전체 영구 삭제
+         * 휴지통 비우기: soft-deleted 노드 전체 영구 삭제
          * @description 본인 personal soft-deleted + 회사 shared soft-deleted 노드를 hard delete + S3 object 제거.
          *
          *     부모만 휴지통에 들어간 폴더의 자손 파일들도 RECURSIVE CTE 로 펼쳐 S3 object 까지 제거.
@@ -114,7 +114,7 @@ export interface paths {
         };
         /**
          * 공유받은 노드 목록
-         * @description 본인이 직접 grantee 인 `FileShare` 의 노드 (ancestor 상속은 제외 — 거기엔 자손이 함께 노출되므로 중복).
+         * @description 본인이 직접 grantee 인 `FileShare` 의 노드 (ancestor 상속은 제외: 거기엔 자손이 함께 노출되므로 중복).
          *
          *     expired share 는 제외.
          */
@@ -135,14 +135,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Desktop sync — delta polling. since 이후 변경분.
+         * Desktop sync: delta polling. since 이후 변경분.
          * @description Desktop sync 클라이언트 의 delta polling endpoint (ADR-0015).
          *
          *     `audit_logs` 의 entity_type='node' 변경을 since 이후로 가져옴.
          *     권한 layer: scope=shared (회사 멤버 모두) / scope=personal owner / FileShare direct grantee.
          *     Ancestor share 상속은 Phase 4 (지금은 direct share 만).
          *
-         *     limit 초과 시 has_more=true — 클라이언트가 마지막 occurred_at 으로 다시 호출.
+         *     limit 초과 시 has_more=true: 클라이언트가 마지막 occurred_at 으로 다시 호출.
          */
         get: operations["get_changes_api_v1_nodes_changes_get"];
         put?: never;
@@ -161,7 +161,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 조상 체인 — root 부터 leaf 까지 순서
+         * 조상 체인: root 부터 leaf 까지 순서
          * @description 브레드크럼용. leaf 자신 포함, root → leaf 순서.
          */
         get: operations["get_ancestors_api_v1_nodes__node_id__ancestors_get"];
@@ -189,7 +189,7 @@ export interface paths {
         post?: never;
         /**
          * 휴지통 이동 (soft delete)
-         * @description soft delete — `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.
+         * @description soft delete: `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.
          *
          *     진행 중 multipart 업로드는 S3 abort 시도 후 계속.
          *     Desktop sync 의 If-Match 헤더 검증.
@@ -201,7 +201,7 @@ export interface paths {
          * 이름 변경 / 이동
          * @description 필드만 보낸 것만 변경. parent_id 변경 시 사이클·scope 일관 검사.
          *
-         *     Desktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교 — mismatch 시 412.
+         *     Desktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교: mismatch 시 412.
          */
         patch: operations["patch_node_api_v1_nodes__node_id__patch"];
         trace?: never;
@@ -236,7 +236,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 업로드 시작 — presigned URL 발급
+         * 업로드 시작: presigned URL 발급
          * @description `size` 가 50MB(`multipart_threshold_bytes`) 이상이면 multipart 흐름으로 분기.
          *
          *     응답 분기:
@@ -286,8 +286,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Multipart: 완료 — CompleteMultipartUpload
-         * @description parts = [{PartNumber, ETag}, ...] — 모든 파트 PUT 후 호출.
+         * Multipart: 완료: CompleteMultipartUpload
+         * @description parts = [{PartNumber, ETag}, ...]: 모든 파트 PUT 후 호출.
          *
          *     실패 시 S3 측 multipart abort 시도 후 400. status → ready 로 전이 + audit row.
          */
@@ -307,7 +307,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 단일 PUT 완료 — head_object 로 확인 후 ready 전이 */
+        /** 단일 PUT 완료: head_object 로 확인 후 ready 전이 */
         post: operations["complete_upload_api_v1_nodes__node_id__complete_post"];
         delete?: never;
         options?: never;
@@ -325,14 +325,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 내용 교체 시작 — 기존 file 노드에 새 내용 presigned URL
+         * 내용 교체 시작: 기존 file 노드에 새 내용 presigned URL
          * @description Desktop sync (ADR-0015) 의 수정 업로드 경로.
          *
          *     write-to-new-key + swap: 새 내용은 별도 S3 key (`pending_storage_key`) 로
          *     올라가고 `/overwrite-complete` 에서 승격. 업로드 실패가 현재 내용을 깨뜨리지
-         *     않음. If-Match 로 optimistic locking — 412 면 클라이언트가 충돌 사본 생성.
+         *     않음. If-Match 로 optimistic locking: 412 면 클라이언트가 충돌 사본 생성.
          *
-         *     이미 진행 중인 교체가 있으면 새 교체가 그것을 대체 (옛 pending key 는 고아 —
+         *     이미 진행 중인 교체가 있으면 새 교체가 그것을 대체 (옛 pending key 는 고아.
          *     cron 정리 대상, 기능 영향 없음).
          */
         post: operations["create_overwrite_url_api_v1_nodes__node_id__overwrite_url_post"];
@@ -352,7 +352,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 내용 교체 완료 — 새 key 승격 + 옛 객체 삭제
+         * 내용 교체 완료: 새 key 승격 + 옛 객체 삭제
          * @description 단일 PUT 은 body 없이, multipart 는 parts 리스트와 함께 호출.
          */
         post: operations["complete_overwrite_api_v1_nodes__node_id__overwrite_complete_post"];
@@ -446,7 +446,7 @@ export interface paths {
         /** 외부 링크 목록 */
         get: operations["list_external_links_api_v1_nodes__node_id__external_links_get"];
         put?: never;
-        /** 외부 링크 발급 — 인증 없이 `/s/{token}` 으로 접근 가능 */
+        /** 외부 링크 발급: 인증 없이 `/s/{token}` 으로 접근 가능 */
         post: operations["create_external_link_api_v1_nodes__node_id__external_links_post"];
         delete?: never;
         options?: never;
@@ -464,7 +464,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 외부 링크 철회 — `revoked_at` 세팅 */
+        /** 외부 링크 철회: `revoked_at` 세팅 */
         delete: operations["revoke_external_link_api_v1_nodes__node_id__external_links__link_id__delete"];
         options?: never;
         head?: never;
@@ -557,7 +557,7 @@ export interface paths {
         put?: never;
         /**
          * 외부 ICS 재동기화 (wipe-and-reload)
-         * @description 외부 ICS 캘린더 재동기화 — owner 또는 admin 만.
+         * @description 외부 ICS 캘린더 재동기화: owner 또는 admin 만.
          */
         post: operations["refresh_calendar_api_v1_calendars__calendar_id__refresh_post"];
         delete?: never;
@@ -576,7 +576,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * ICS 파일 1회성 import — 파일은 보관하지 않음
+         * ICS 파일 1회성 import: 파일은 보관하지 않음
          * @description 업로드된 .ics 파일의 master VEVENT 들을 캘린더에 적재. 파일 자체는 저장 안 함.
          */
         post: operations["import_ics_api_v1_calendars__calendar_id__import_ics_post"];
@@ -614,7 +614,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** ICS subscription 토큰 회전 — 기존 URL 즉시 무효 */
+        /** ICS subscription 토큰 회전: 기존 URL 즉시 무효 */
         post: operations["rotate_subscription_api_v1_calendars__calendar_id__subscription_rotate_post"];
         delete?: never;
         options?: never;
@@ -654,7 +654,7 @@ export interface paths {
         };
         /**
          * .ics 단건 다운로드 (RFC 5545)
-         * @description 단건 .ics 다운로드 — RFC 5545. master + RRULE + EXDATE 그대로 export.
+         * @description 단건 .ics 다운로드: RFC 5545. master + RRULE + EXDATE 그대로 export.
          */
         get: operations["export_event_ics_api_v1_events__event_id__ics_get"];
         put?: never;
@@ -694,7 +694,7 @@ export interface paths {
         /** 이벤트 초대자 목록 */
         get: operations["list_invitations_api_v1_events__event_id__invitations_get"];
         put?: never;
-        /** 초대 추가 — 작성자/캘린더 owner 만 */
+        /** 초대 추가: 작성자/캘린더 owner 만 */
         post: operations["create_invitation_api_v1_events__event_id__invitations_post"];
         delete?: never;
         options?: never;
@@ -712,7 +712,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 초대 제거 — 작성자/owner 만 */
+        /** 초대 제거: 작성자/owner 만 */
         delete: operations["delete_invitation_api_v1_events__event_id__invitations__invitation_id__delete"];
         options?: never;
         head?: never;
@@ -816,7 +816,7 @@ export interface paths {
         /** 회사 endpoint 목록 */
         get: operations["list_endpoints_api_v1_webhooks_get"];
         put?: never;
-        /** endpoint 등록 — secret 생성·1회 노출 */
+        /** endpoint 등록: secret 생성·1회 노출 */
         post: operations["create_endpoint_api_v1_webhooks_post"];
         delete?: never;
         options?: never;
@@ -902,7 +902,7 @@ export interface paths {
         };
         /**
          * 회사 멤버 자동완성 검색
-         * @description active company 멤버 ILIKE 검색 — email · name 매칭. 본인은 결과에서 제외.
+         * @description active company 멤버 ILIKE 검색: email · name 매칭. 본인은 결과에서 제외.
          *
          *     q 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).
          *     캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.
@@ -963,7 +963,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** 멤버 role 변경 — admin 임명/강등 (System Admin) */
+        /** 멤버 role 변경: admin 임명/강등 (System Admin) */
         patch: operations["patch_member_role_api_v1_admin_companies__company_id__members__user_sub__patch"];
         trace?: never;
     };
@@ -1031,7 +1031,7 @@ export interface paths {
         /** 회사 SMTP override 저장 (Company Admin) */
         put: operations["put_company_smtp_api_v1_companies__company_id__smtp_put"];
         post?: never;
-        /** 회사 SMTP override 삭제 — 전역 SMTP 사용으로 복귀 (Company Admin) */
+        /** 회사 SMTP override 삭제: 전역 SMTP 사용으로 복귀 (Company Admin) */
         delete: operations["delete_company_smtp_api_v1_companies__company_id__smtp_delete"];
         options?: never;
         head?: never;
@@ -1291,12 +1291,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 이메일 템플릿 단건 — 현재 active (override 또는 기본) */
+        /** 이메일 템플릿 단건: 현재 active (override 또는 기본) */
         get: operations["get_template_api_v1_companies__company_id__email_templates__event_type__get"];
         /** 이메일 템플릿 override 저장 */
         put: operations["put_template_api_v1_companies__company_id__email_templates__event_type__put"];
         post?: never;
-        /** 회사 override 삭제 — 시스템 기본 사용으로 복귀 */
+        /** 회사 override 삭제: 시스템 기본 사용으로 복귀 */
         delete: operations["delete_template_api_v1_companies__company_id__email_templates__event_type__delete"];
         options?: never;
         head?: never;
@@ -1312,7 +1312,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 템플릿 미리보기 — 샘플 변수로 렌더링 */
+        /** 템플릿 미리보기: 샘플 변수로 렌더링 */
         post: operations["preview_template_api_v1_companies__company_id__email_templates__event_type__preview_post"];
         delete?: never;
         options?: never;
@@ -1330,7 +1330,7 @@ export interface paths {
         /** CalDAV 토큰 목록 (활성 회사 범위) */
         get: operations["list_tokens_api_v1_me_caldav_tokens_get"];
         put?: never;
-        /** CalDAV 토큰 발급 — secret 평문은 응답에만 */
+        /** CalDAV 토큰 발급: secret 평문은 응답에만 */
         post: operations["create_token_api_v1_me_caldav_tokens_post"];
         delete?: never;
         options?: never;
@@ -1348,7 +1348,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** CalDAV 토큰 폐기 — 즉시 무효 */
+        /** CalDAV 토큰 폐기: 즉시 무효 */
         delete: operations["revoke_token_api_v1_me_caldav_tokens__token_id__delete"];
         options?: never;
         head?: never;
@@ -1379,7 +1379,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** OnlyOffice 가 호출 — 토큰으로 식별된 파일의 binary 반환 */
+        /** OnlyOffice 가 호출: 토큰으로 식별된 파일의 binary 반환 */
         get: operations["serve_file_api_v1_onlyoffice_files__token__get"];
         put?: never;
         post?: never;
@@ -1398,7 +1398,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** OnlyOffice 의 저장 알림 — status 2/6 시 본문 fetch 후 우리 S3 갱신 */
+        /** OnlyOffice 의 저장 알림: status 2/6 시 본문 fetch 후 우리 S3 갱신 */
         post: operations["callback_api_v1_onlyoffice_callback__token__post"];
         delete?: never;
         options?: never;
@@ -1449,7 +1449,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 예약 제출 (즉시 등록 — ADR-0012) */
+        /** 예약 제출 (즉시 등록: ADR-0012) */
         post: operations["submit_booking_api_public_v1_booking__public_key__submit_post"];
         delete?: never;
         options?: never;
@@ -1498,7 +1498,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 공개 링크 메타 — 인증 불필요 */
+        /** 공개 링크 메타: 인증 불필요 */
         get: operations["public_link_meta_s__token__get"];
         put?: never;
         post?: never;
@@ -1536,7 +1536,7 @@ export interface paths {
          * 헬스 체크
          * @description LB/cron 용. 인증 불필요. 항상 `{"status": "ok"}` 반환.
          *
-         *     DB 연결 실패해도 200 — DB 의존 핸들러에서 별도 503 응답.
+         *     DB 연결 실패해도 200: DB 의존 핸들러에서 별도 503 응답.
          */
         get: operations["health_health_get"];
         put?: never;
@@ -2056,7 +2056,7 @@ export interface components {
         };
         /**
          * EmailTemplateItem
-         * @description 리스트 응답의 한 행 — 어떤 event_type 이 커스텀돼 있는지.
+         * @description 리스트 응답의 한 행: 어떤 event_type 이 커스텀돼 있는지.
          */
         EmailTemplateItem: {
             /** Event Type */
@@ -2192,7 +2192,7 @@ export interface components {
         };
         /**
          * EventOccurrence
-         * @description Expanded occurrence — 마스터 event 의 한 발생.
+         * @description Expanded occurrence: 마스터 event 의 한 발생.
          *
          *     series 식별자는 event_id (불변), occurrence 식별자는 start_at (ISO).
          */
@@ -2560,7 +2560,7 @@ export interface components {
         };
         /**
          * PublicBookingResponse
-         * @description 제출 직후 응답 — 예약자에게 보여줄 정보 + cancel 링크용 token.
+         * @description 제출 직후 응답: 예약자에게 보여줄 정보 + cancel 링크용 token.
          */
         PublicBookingResponse: {
             /** Cancel Token */
@@ -2601,7 +2601,7 @@ export interface components {
         };
         /**
          * PublicBookingTypeResponse
-         * @description 공개 표시 — 운영자 신원 노출 X.
+         * @description 공개 표시: 운영자 신원 노출 X.
          */
         PublicBookingTypeResponse: {
             /** Public Key */
@@ -3676,7 +3676,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description multipart 노드 — `/complete-multipart` 사용해야 함 */
+            /** @description multipart 노드: `/complete-multipart` 사용해야 함 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3891,7 +3891,7 @@ export interface operations {
                     "application/zip": unknown;
                 };
             };
-            /** @description 파일 노드 — `/download-url` 사용 */
+            /** @description 파일 노드: `/download-url` 사용 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4362,7 +4362,7 @@ export interface operations {
                     "application/json": components["schemas"]["CalendarResponse"];
                 };
             };
-            /** @description write 권한 없음 — personal 의 owner 아님 */
+            /** @description write 권한 없음: personal 의 owner 아님 */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -4790,7 +4790,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description external_ics 캘린더 — read-only */
+            /** @description external_ics 캘린더: read-only */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4883,7 +4883,7 @@ export interface operations {
     delete_event_api_v1_events__event_id__delete: {
         parameters: {
             query?: {
-                /** @description ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리 — series 유지. */
+                /** @description ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리: series 유지. */
                 occurrence?: string | null;
             };
             header: {
@@ -5421,7 +5421,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 응답 body 의 `secret` 은 이 호출에서만 노출됨 — 클라이언트가 저장 책임 */
+            /** @description 응답 body 의 `secret` 은 이 호출에서만 노출됨: 클라이언트가 저장 책임 */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -5776,7 +5776,7 @@ export interface operations {
                     "application/json": components["schemas"]["MemberItem"];
                 };
             };
-            /** @description 멤버십 없음 — 그 사용자가 그 회사로 한 번도 로그인 안 함 */
+            /** @description 멤버십 없음: 그 사용자가 그 회사로 한 번도 로그인 안 함 */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -1,5 +1,5 @@
 /**
- * 싱크용 E2E 세션 (ADR-0016, V5) — 웹과 동일한 봉투 암호화로 vault 이름/내용 복호화.
+ * 싱크용 E2E 세션 (ADR-0016, V5): 웹과 동일한 봉투 암호화로 vault 이름/내용 복호화.
  *
  * webview(React) 라 웹의 crypto.ts 를 그대로 재사용. 개인키 + vault_key 캐시는
  * 메모리에만 (새로고침/재시작 시 휘발 → 재잠금해제).
@@ -52,7 +52,7 @@ export async function unlock(password: string, useRecovery = false): Promise<voi
   }
 }
 
-/** vault_key 확보 — 회사별로 wrapped 받아 개인키로 unwrap 후 캐시. */
+/** vault_key 확보: 회사별로 wrapped 받아 개인키로 unwrap 후 캐시. */
 async function getVaultKey(company: string, vaultNodeId: string): Promise<CryptoKey | null> {
   const cacheKey = `${company}|${vaultNodeId}`
   const cached = _vaultKeys.get(cacheKey)

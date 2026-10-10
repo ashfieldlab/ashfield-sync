@@ -1,13 +1,13 @@
 /**
- * 앱 설정 — tauri-plugin-store 기반 (settings.json).
+ * 앱 설정: tauri-plugin-store 기반 (settings.json).
  *
- * 실제 파일: %APPDATA%\<bundle-id>\settings.json — Windows 의 앱별 설정
+ * 실제 파일: %APPDATA%\<bundle-id>\settings.json: Windows 의 앱별 설정
  * 표준 위치. 비밀 아님 (refresh_token 은 Rust keychain 별도).
  *
  * 키:
  *   syncRoot           sync 폴더 위치 (default ~\Ashfield)
  *   excludedCompanies  opt-out 회사 목록 (default 빈 배열 = 전체 sync)
- *   lastSyncByCompany  회사별 delta polling 의 since 기준 (ISO) — 회사마다
+ *   lastSyncByCompany  회사별 delta polling 의 since 기준 (ISO): 회사마다
  *                      변경 스트림이 독립이라 단일 시각으로는 안 됨
  */
 
@@ -40,8 +40,8 @@ export async function getSettings(): Promise<Settings> {
   }
 }
 
-// 전체 초기화 — 모든 설정 키 삭제 (폴더/제외/온보딩/lastSync). 다음 로그인이
-// 첫 실행처럼 동작. refresh_token(keychain) 은 별개 — 로그아웃이 처리.
+// 전체 초기화: 모든 설정 키 삭제 (폴더/제외/온보딩/lastSync). 다음 로그인이
+// 첫 실행처럼 동작. refresh_token(keychain) 은 별개: 로그아웃이 처리.
 export async function resetSettings(): Promise<void> {
   const s = await store()
   await s.clear()

@@ -1,7 +1,7 @@
 /**
- * 환경변수 단일 source. (Vite — 빌드 시점에 박힘)
+ * 환경변수 단일 source. (Vite: 빌드 시점에 박힘)
  *
- * `import.meta.env` 직접 접근 금지 — 여기 거쳐서 가져오기.
+ * `import.meta.env` 직접 접근 금지: 여기 거쳐서 가져오기.
  *
  * - ACCOUNT_URL    Ashfield 계정 서버 = OIDC issuer. 엔드포인트는 디스커버리에서 읽음.
  * - DRIVE_URL      Drive **API base** (백엔드). 로컬 dev 8200.
@@ -19,12 +19,12 @@ function optional(key: string): string | undefined {
 const strip = (u: string) => u.replace(/\/+$/, "")
 
 const accountUrl = strip(optional("VITE_ACCOUNT_URL") ?? "http://localhost:3300")
-// VITE_API_URL — 옛 이름 (하위 호환)
+// VITE_API_URL: 옛 이름 (하위 호환)
 const driveUrl = strip(optional("VITE_DRIVE_URL") ?? optional("VITE_API_URL") ?? "http://localhost:8200")
 const driveResource = strip(optional("VITE_DRIVE_RESOURCE") ?? "http://localhost:3200")
 
 export const env = {
-  /** Drive API base — 모든 /api/v1 호출 */
+  /** Drive API base: 모든 /api/v1 호출 */
   apiUrl: driveUrl,
   accountUrl,
   oauth: {

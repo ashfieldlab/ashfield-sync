@@ -12,7 +12,7 @@ dist
 dist-ssr
 *.local
 
-# 환경 변수 — 실제 값(.env) 은 절대 commit 금지. .env.example 만 추적.
+# 환경 변수: 실제 값(.env) 은 절대 commit 금지. .env.example 만 추적.
 .env
 .env.local
 .env.*.local
