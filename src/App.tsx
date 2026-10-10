@@ -1370,11 +1370,7 @@ function App() {
         <TitleBar />
         <main className="container">
           <h1>Ashfield</h1>
-          <p className="subtitle">백엔드: <code>{env.apiUrl}</code></p>
           <div className="login">
-            <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px" }}>
-              아래 버튼을 누르면 브라우저가 열려 Ashfield 계정으로 로그인합니다.
-            </p>
             <button onClick={handleLogin} disabled={state.loading}>
               {state.loading ? "로그인 중..." : "Ashfield 계정으로 로그인"}
             </button>
@@ -1391,22 +1387,15 @@ function App() {
         <TitleBar />
         <main className="container">
           <h1>환영합니다 👋</h1>
-          <p className="subtitle">{state.me.email} 님, 동기화를 시작할 준비가 거의 끝났어요.</p>
+          <p className="subtitle">{state.me.email}</p>
           <div className="login" style={{ maxWidth: 620 }}>
-            <p style={{ fontSize: "14px", marginBottom: "4px", fontWeight: 600 }}>동기화 폴더</p>
-            <p style={{ fontSize: "13px", color: "#666", marginBottom: "10px" }}>
-              소속된 모든 회사의 파일이 이 폴더 아래에 나타납니다. 파일은 열 때
-              자동으로 내려받고(클라우드 아이콘), 편집하면 자동으로 올라갑니다.
-            </p>
+            <p style={{ fontSize: "14px", marginBottom: "8px", fontWeight: 600 }}>동기화 폴더</p>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "18px" }}>
               <code style={{ flex: 1, fontSize: "13px", background: "#f1f3f7", padding: "8px 10px", borderRadius: 6 }}>
                 {settings.syncRoot}
               </code>
               <button onClick={() => void handleOnboardingFolder()}>변경</button>
             </div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "16px" }}>
-              특정 회사는 나중에 설정에서 제외할 수 있습니다.
-            </p>
             <button onClick={() => void handleStartSync()}>동기화 시작</button>
           </div>
           {state.error && <pre className="error">{state.error}</pre>}
@@ -1427,7 +1416,7 @@ function App() {
           {!e2eUnlocked ? (
             <button onClick={() => { setE2eErr(null); setE2eModal(true) }}>🔒 보안 해제</button>
           ) : (
-            <button onClick={() => void handleE2ELock()} title="보안 폴더를 다시 잠급니다">🔓 보안 잠금</button>
+            <button onClick={() => void handleE2ELock()}>🔓 보안 잠금</button>
           )}
           <button onClick={() => setShowSettings(true)}>설정</button>
           <button onClick={handleLogout}>로그아웃</button>
@@ -1438,14 +1427,8 @@ function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setE2eModal(false)}>
           <div style={{ background: "#fff", borderRadius: 8, padding: 20, width: 360 }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>🔒 보안 해제</h3>
-            <p style={{ fontSize: 13, color: "#666" }}>웹에서 설정한 암호화 비밀번호를 입력하면 보안 폴더 내용이 표시됩니다.</p>
             <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#92400e", lineHeight: 1.6 }}>
-              <strong>참고</strong>
-              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                <li>비밀번호와 복구코드를 <strong>모두 분실하면 복구할 수 없습니다.</strong> 관리자도 복구가 불가능합니다.</li>
-                <li>보안 폴더는 문서용입니다. 대용량 영상·이미지는 처리가 느릴 수 있습니다.</li>
-                <li>큰 파일은 처음 열 때 전체를 내려받습니다. 미리보기·썸네일은 제공되지 않습니다.</li>
-              </ul>
+              비밀번호와 복구코드를 <strong>모두 분실하면 복구할 수 없습니다.</strong>
             </div>
             <input
               type="password"
@@ -1488,9 +1471,7 @@ function App() {
           </div>
           <div>
             <strong>회사별 동기화</strong>
-            <p style={{ fontSize: "12px", color: "#666", margin: "4px 0 8px" }}>
-              기본은 모든 회사가 동기화됩니다. 끄면 탐색기에서 해당 회사 폴더가 제거됩니다.
-            </p>
+            <div style={{ marginTop: "6px" }}>
             {state.me.groups.map((c) => {
               const excluded = settings.excludedCompanies.includes(c)
               return (
@@ -1504,6 +1485,7 @@ function App() {
                 </label>
               )
             })}
+            </div>
           </div>
           <div style={{ borderTop: "1px solid #eee", marginTop: "14px", paddingTop: "14px" }}>
             <strong>업데이트</strong>
@@ -1517,7 +1499,7 @@ function App() {
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
               <button onClick={() => void handleReplayOnboarding()}>온보딩 다시 보기</button>
               <button
-                onClick={() => { if (confirm("이 PC의 동기화를 해제하고 로컬 동기화 폴더를 삭제합니다.\n서버에 있는 파일은 그대로 유지됩니다.\n계속할까요?")) void handleResetAll() }}
+                onClick={() => { if (confirm("이 PC의 동기화를 해제하고 로컬 동기화 폴더를 삭제합니다.\n서버의 파일은 유지됩니다.")) void handleResetAll() }}
                 style={{ color: "#b91c1c" }}
               >
                 전체 초기화
