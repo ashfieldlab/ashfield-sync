@@ -45,9 +45,9 @@ npm run tauri dev
 
 | | |
 |---|---|
-| [Account](https://github.com/ashfieldlab/ashfield-account) | 계정 · 워크스페이스 |
-| [Calendar](https://github.com/ashfieldlab/ashfield-calendar) | 일정 · 회의실 · 예약 |
-| [Drive](https://github.com/ashfieldlab/ashfield-drive) | 파일 저장 · 공유 |
+| [Account](https://github.com/ashfieldlab/ashfield-account) | 계정, 워크스페이스 |
+| [Calendar](https://github.com/ashfieldlab/ashfield-calendar) | 일정, 회의실, 예약 |
+| [Drive](https://github.com/ashfieldlab/ashfield-drive) | 파일 저장, 공유 |
 | [Sync](https://github.com/ashfieldlab/ashfield-sync) | Drive 데스크톱 동기화 (Windows) |
 
 ## 라이선스

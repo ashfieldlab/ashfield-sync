@@ -108,7 +108,7 @@ export async function makeUploadKey(
   return { rawB64: c.toB64(new Uint8Array(raw)), wrapped: await c.wrapKeyAes(dek, vk) }
 }
 
-/** vault 파일/폴더명 암호화 (V5c, 생성·이름변경용). 실패 시 null. */
+/** vault 파일/폴더명 암호화 (V5c, 생성과 이름변경용). 실패 시 null. */
 export async function encryptName(
   workspace: string,
   vaultNodeId: string,

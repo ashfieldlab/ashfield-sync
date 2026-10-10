@@ -8,7 +8,7 @@
  *
  * 알고리즘:
  *   - KDF: Argon2id (m=64MB, t=3, p=4)       : 비밀번호/복구코드 → 32B
- *   - 키쌍: RSA-OAEP 4096 / SHA-256          : 개인키·vault_key·DEK wrap
+ *   - 키쌍: RSA-OAEP 4096 / SHA-256          : 개인키, vault_key, DEK wrap
  *   - 대칭: AES-GCM 256 (12B IV, 16B tag)    : 개인키/파일/파일명 암호화
  */
 
@@ -96,7 +96,7 @@ export async function aesDecrypt(key: CryptoKey, b64: string): Promise<Uint8Arra
   return new Uint8Array(pt)
 }
 
-// 파일/폴더명 암복호: 출력은 base64url (파일시스템·경로 안전, `/` `+` `=` 없음).
+// 파일/폴더명 암복호: 출력은 base64url (파일시스템과 경로 안전, `/` `+` `=` 없음).
 // 표준 base64 면 `/` 가 경로 구분자로 오인돼 싱크 placeholder 경로가 깨진다.
 export async function aesEncryptText(key: CryptoKey, text: string): Promise<string> {
   const iv = randomBytes(12)

@@ -37,7 +37,7 @@ npm run tauri build
 |---|---|---|
 | `VITE_ACCOUNT_URL` | `https://account.example.com` | 계정 서버 issuer (디스커버리) |
 | `VITE_DRIVE_URL` | `https://drive.example.com` | Drive API base: `capabilities/default.json` allowlist 에도 추가 |
-| `VITE_DRIVE_RESOURCE` | `https://drive.example.com` | 계정 서버의 `DRIVE_URL` · Drive 백엔드의 `AUTH_AUDIENCE` 와 **정확히** 같게 |
+| `VITE_DRIVE_RESOURCE` | `https://drive.example.com` | 계정 서버의 `DRIVE_URL`, Drive 백엔드의 `AUTH_AUDIENCE` 와 **정확히** 같게 |
 | `VITE_OAUTH_CLIENT_ID` | `ashfield-sync` | |
 | `VITE_OAUTH_REDIRECT_PORT` | `1421` | 계정 서버 `SYNC_REDIRECT_URIS` 에 `http://127.0.0.1:1421/oauth/callback` 등록 필요 |
 

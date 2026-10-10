@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Ashfield Drive API",
-    "description": "\nashfield-drive 백엔드: 워크스페이스 파일 저장·공유 SaaS.\n\n## 공통 요청 헤더\n\n| 헤더 | 값 | 비고 |\n|------|----|------|\n| `Authorization` | `Bearer <JWT>` | Better Auth(JWT 플러그인) 발급. `AUTH_JWKS_URL` 로 서명·iss·aud 검증. |\n| `X-Active-Workspace-Id` | 소속 워크스페이스 ID 중 하나 | 멀티 테넌트. `/api/v1/me` 의 `groups`. 소속이 아니면 403. |\n| `X-Request-ID` | UUID 등 trace id | 로그/응답 헤더에 echo. 없으면 자동 발급. |\n\n## 권한 모델 요약 (ADR-0008)\n\n- **scope=personal**: owner 만 접근. `FileShare` 로 명시적으로 부여하면 grantee 도 접근.\n- **scope=shared**: 같은 워크스페이스 멤버 모두 접근.\n- **공유 상속**: 폴더에 share 가 걸리면 자손도 자동 접근. 재귀 CTE 로 계산.\n- **공유 관리**: owner + `permission=manage` 보유자만.\n\n## 표준 응답 코드\n\n| 코드 | 의미 |\n|------|------|\n| 200 | OK |\n| 201 | 생성됨. body 에 새 리소스. |\n| 204 | OK, body 없음 |\n| 400 | 요청 자체가 잘못됨 (예: 폴더를 자손 아래로 이동) |\n| 401 | 인증 실패 (토큰 없음·만료·서명·iss·aud 불일치) |\n| 403 | 인증은 됐지만 권한 없음 |\n| 404 | 리소스 없음: 다른 워크스페이스 리소스도 404 로 마스킹 |\n| 409 | 상태 충돌 (예: 업로드 미완료 파일 다운로드 시도) |\n| 413 | 페이로드 한도 초과 |\n| 422 | 검증 실패 (Pydantic) |\n\n## 외부 (인증 없음) 라우트\n\n`/s/{token}` 계열은 인증 헤더 없이 접근. 토큰 자체가 capability.\n\n자세한 흐름은 [SPEC.md](https://github.com/ashfieldlab/ashfield-drive/blob/main/SPEC.md) 참고.\n",
+    "description": "\nashfield-drive 백엔드: 워크스페이스 파일 저장, 공유 SaaS.\n\n## 공통 요청 헤더\n\n| 헤더 | 값 | 비고 |\n|------|----|------|\n| `Authorization` | `Bearer <JWT>` | Better Auth(JWT 플러그인) 발급. `AUTH_JWKS_URL` 로 서명, iss, aud 검증. |\n| `X-Active-Workspace-Id` | 소속 워크스페이스 ID 중 하나 | 멀티 테넌트. `/api/v1/me` 의 `groups`. 소속이 아니면 403. |\n| `X-Request-ID` | UUID 등 trace id | 로그/응답 헤더에 echo. 없으면 자동 발급. |\n\n## 권한 모델 요약 (ADR-0008)\n\n- **scope=personal**: owner 만 접근. `FileShare` 로 명시적으로 부여하면 grantee 도 접근.\n- **scope=shared**: 같은 워크스페이스 멤버 모두 접근.\n- **공유 상속**: 폴더에 share 가 걸리면 자손도 자동 접근. 재귀 CTE 로 계산.\n- **공유 관리**: owner + `permission=manage` 보유자만.\n\n## 표준 응답 코드\n\n| 코드 | 의미 |\n|------|------|\n| 200 | OK |\n| 201 | 생성됨. body 에 새 리소스. |\n| 204 | OK, body 없음 |\n| 400 | 요청 자체가 잘못됨 (예: 폴더를 자손 아래로 이동) |\n| 401 | 인증 실패 (토큰 없음, 만료, 서명, iss, aud 불일치) |\n| 403 | 인증은 됐지만 권한 없음 |\n| 404 | 리소스 없음: 다른 워크스페이스 리소스도 404 로 마스킹 |\n| 409 | 상태 충돌 (예: 업로드 미완료 파일 다운로드 시도) |\n| 413 | 페이로드 한도 초과 |\n| 422 | 검증 실패 (Pydantic) |\n\n## 외부 (인증 없음) 라우트\n\n`/s/{token}` 계열은 인증 헤더 없이 접근. 토큰 자체가 capability.\n\n자세한 흐름은 [SPEC.md](https://github.com/ashfieldlab/ashfield-drive/blob/main/SPEC.md) 참고.\n",
     "contact": {
       "name": "Ashfield Drive",
       "url": "https://github.com/ashfieldlab/ashfield-drive"
@@ -16,7 +16,7 @@
           "auth"
         ],
         "summary": "현재 사용자 정보",
-        "description": "신원 + 우리 DB 의 소속 워크스페이스·role.\n\n부수효과: `users` 행 upsert, 토큰 `workspaces` 가 바뀌었으면 워크스페이스·멤버십 동기화.\ngroups: 소속 워크스페이스 ID 목록. workspaces: 같은 목록의 {id, name, account_workspace_id}\n(account_workspace_id = 계정 서버 워크스페이스 ID, 로컬 레거시 워크스페이스는 null).\nworkspace_roles: 워크스페이스별 role (ADR-0010, frontend isWorkspaceAdmin 계산용).",
+        "description": "신원 + 우리 DB 의 소속 워크스페이스와 role.\n\n부수효과: `users` 행 upsert, 토큰 `workspaces` 가 바뀌었으면 워크스페이스와 멤버십 동기화.\ngroups: 소속 워크스페이스 ID 목록. workspaces: 같은 목록의 {id, name, account_workspace_id}\n(account_workspace_id = 계정 서버 워크스페이스 ID, 로컬 레거시 워크스페이스는 null).\nworkspace_roles: 워크스페이스별 role (ADR-0010, frontend isWorkspaceAdmin 계산용).",
         "operationId": "get_me_api_v1_me_get",
         "parameters": [
           {
@@ -50,7 +50,7 @@
             }
           },
           "401": {
-            "description": "JWT 없음·만료·서명·iss·aud 불일치"
+            "description": "JWT 없음, 만료, 서명, iss, aud 불일치"
           },
           "422": {
             "description": "Validation Error",
@@ -70,7 +70,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "내 저장 사용량·한도 (활성 워크스페이스 기준)",
+        "summary": "내 저장 사용량과 한도 (활성 워크스페이스 기준)",
         "operationId": "get_my_storage_api_v1_me_storage_get",
         "parameters": [
           {
@@ -774,7 +774,7 @@
           "nodes"
         ],
         "summary": "이름 변경 / 이동",
-        "description": "필드만 보낸 것만 변경. parent_id 변경 시 사이클·scope 일관 검사.\n\nDesktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교: mismatch 시 412.",
+        "description": "필드만 보낸 것만 변경. parent_id 변경 시 사이클과 scope 일관 검사.\n\nDesktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교: mismatch 시 412.",
         "operationId": "patch_node_api_v1_nodes__node_id__patch",
         "parameters": [
           {
@@ -874,7 +874,7 @@
         "tags": [
           "nodes"
         ],
-        "summary": "휴지통 이동 (soft delete) · 보안 폴더는 즉시 영구 삭제",
+        "summary": "휴지통 이동 (soft delete), 보안 폴더는 즉시 영구 삭제",
         "description": "soft delete: `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.\n\n진행 중 multipart 업로드는 S3 abort 시도 후 계속.\nDesktop sync 의 If-Match 헤더 검증.",
         "operationId": "delete_node_api_v1_nodes__node_id__delete",
         "parameters": [
@@ -2365,7 +2365,7 @@
             }
           },
           "409": {
-            "description": "업로드·교체가 진행 중인 파일"
+            "description": "업로드나 교체가 진행 중인 파일"
           },
           "422": {
             "description": "Validation Error",
@@ -2635,7 +2635,7 @@
         "tags": [
           "audit"
         ],
-        "summary": "감사 로그 CSV 내보내기 (같은 접근·필터)",
+        "summary": "감사 로그 CSV 내보내기 (같은 접근과 필터)",
         "operationId": "export_audit_csv_api_v1_audit_export_csv_get",
         "parameters": [
           {
@@ -3230,7 +3230,7 @@
         "tags": [
           "webhooks"
         ],
-        "summary": "endpoint 등록: secret 생성·1회 노출",
+        "summary": "endpoint 등록: secret 생성, 1회 노출",
         "operationId": "create_endpoint_api_v1_webhooks_post",
         "parameters": [
           {
@@ -3753,7 +3753,7 @@
           "workspace"
         ],
         "summary": "워크스페이스 멤버 자동완성 검색",
-        "description": "active workspace 멤버 ILIKE 검색: email · name 매칭. 본인은 결과에서 제외.\n\nq 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).\n캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.",
+        "description": "active workspace 멤버 ILIKE 검색: email, name 매칭. 본인은 결과에서 제외.\n\nq 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).\n캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.",
         "operationId": "search_members_api_v1_me_workspace_members_get",
         "parameters": [
           {
@@ -4231,7 +4231,7 @@
             }
           },
           "400": {
-            "description": "연결·인증 실패"
+            "description": "연결, 인증 실패"
           },
           "422": {
             "description": "Validation Error",
@@ -4541,7 +4541,7 @@
             }
           },
           "400": {
-            "description": "연결·인증 실패"
+            "description": "연결, 인증 실패"
           },
           "422": {
             "description": "Validation Error",
@@ -5962,7 +5962,7 @@
             "description": "password 없음/틀림"
           },
           "404": {
-            "description": "링크 없음·만료·철회"
+            "description": "링크 없음, 만료, 철회"
           },
           "409": {
             "description": "파일이 아니거나 업로드 미완료"
@@ -8767,11 +8767,11 @@
     },
     {
       "name": "nodes",
-      "description": "파일·폴더 트리. 업로드·다운로드는 S3 presigned URL 로 클라이언트 직접 통신."
+      "description": "파일과 폴더 트리. 업로드와 다운로드는 S3 presigned URL 로 클라이언트 직접 통신."
     },
     {
       "name": "notifications",
-      "description": "in-app 알림 목록·읽음 처리·이메일 수신 설정."
+      "description": "in-app 알림 목록, 읽음 처리, 이메일 수신 설정."
     },
     {
       "name": "webhooks",
@@ -8791,7 +8791,7 @@
     },
     {
       "name": "workspace",
-      "description": "워크스페이스 멤버 자동완성·멤버 관리."
+      "description": "워크스페이스 멤버 자동완성과 멤버 관리."
     },
     {
       "name": "external",

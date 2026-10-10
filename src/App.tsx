@@ -52,7 +52,7 @@ const SCOPES = ["personal", "shared"] as const
 type Scope = (typeof SCOPES)[number]
 
 // 보안 폴더(vault) 파일 상한: whole-file AES-GCM 이라 평문+암호문을 통째 메모리에
-// 올리고(~2배), 매 저장마다 전체를 재암호화·재업로드한다. 대용량은 비효율·메모리
+// 올리고(~2배), 매 저장마다 전체를 재암호화해 재업로드한다. 대용량은 비효율, 메모리
 // 위험이라 거부. 문서 용도 기준 200MB. (비-vault 파일엔 적용 안 됨)
 const VAULT_MAX_BYTES = 200 * 1024 * 1024
 
@@ -165,7 +165,7 @@ function App() {
   const pollNowRef = useRef<null | (() => Promise<void>)>(null)
   // 활성 워크스페이스: refresh handler(stale closure)가 SSE 재연결에 참조
   const activeWorkspaceRef = useRef<string | null>(null)
-  // 전 워크스페이스·스코프 누적 DEK (node_id → raw base64). vfs_set_deks 가 맵 전체를
+  // 전 워크스페이스와 스코프 누적 DEK (node_id → raw base64). vfs_set_deks 가 맵 전체를
   // 교체하므로 scope 별 호출이 서로 덮어쓰지 않도록 여기 병합해 통째로 푸시.
   const deksRef = useRef<Record<string, string>>({})
   // vault 루트 로컬경로(소문자) → {워크스페이스, vault 노드 id}. 이 아래의 로컬 변경은
@@ -174,7 +174,7 @@ function App() {
 
   // 부팅: 401 자동 refresh handler 주입 + 저장된 refresh_token 있으면 자동 로그인
   useEffect(() => {
-    // 갱신은 Rust 가 직렬화(single-flight): SSE·VFS 도 같은 캐시를 쓰므로 SSE 재연결 불필요
+    // 갱신은 Rust 가 직렬화(single-flight): SSE와 VFS 도 같은 캐시를 쓰므로 SSE 재연결 불필요
     // (SSE 는 401 이면 스스로 새 토큰을 받아 재연결한다).
     setRefreshHandler(async (stale) => {
       const tokens = await oauthRefresh(stale)
@@ -226,7 +226,7 @@ function App() {
     }
   }, [])
 
-  // SSE 가 401 후 refresh 까지 실패(refresh_token 만료·폐기·재사용 감지): 세션 만료, 로그인 화면으로.
+  // SSE 가 401 후 refresh 까지 실패(refresh_token 만료, 폐기, 재사용 감지): 세션 만료, 로그인 화면으로.
   useEffect(() => {
     const unlisten = listen<string>("auth-expired", (ev) => {
       console.warn("[auth] expired", ev.payload)
@@ -593,7 +593,7 @@ function App() {
     }
   }
 
-  // 다시 잠금: 메모리의 키·DEK 를 폐기하고 vault 내용을 탐색기에서 다시 숨긴다.
+  // 다시 잠금: 메모리의 키와 DEK 를 폐기하고 vault 내용을 탐색기에서 다시 숨긴다.
   async function handleE2ELock() {
     e2e.lock() // E2E 키 메모리 폐기
     deksRef.current = {} // Rust 측 DEK 폐기 (복호화 불가 상태로)
@@ -953,7 +953,7 @@ function App() {
         return
       }
       // 내용이 실제로 바뀌었는지 메타데이터로 확인 (내용 안 읽음 → 대용량 안전).
-      // Zone.Identifier(ADS) 변경·실행·재하이드레이션 등은 modify 를 내지만
+      // Zone.Identifier(ADS) 변경, 실행, 재하이드레이션 등은 modify 를 내지만
       // 내용/크기/mtime 은 그대로 → 에코 업로드 방지.
       let st = await invoke<{ size: number; mtimeMs: number; dehydrated: boolean }>("vfs_file_stat", { path: change.path })
       // placeholder(내용 미다운) 는 로컬 편집 자체가 불가 → 무조건 skip.
@@ -963,7 +963,7 @@ function App() {
         entry.size != null && st.size === entry.size &&
         entry.mtimeMs != null && Math.abs(st.mtimeMs - entry.mtimeMs) < 2000
       ) return
-      // settle: 아직 쓰이는 중이면(대용량 복사·청크 기록) 반쪽 파일을 올릴 수 있어,
+      // settle: 아직 쓰이는 중이면(대용량 복사, 청크 기록) 반쪽 파일을 올릴 수 있어,
       // 잠깐 간격을 두고 size/mtime 이 멈출 때까지 재확인한다. 상한까지도 계속 변하면
       // 이번엔 건너뛴다: 쓰기가 멈추면 debouncer 의 trailing 이벤트가 최신본을 다시 올린다.
       let settled = false
@@ -1045,7 +1045,7 @@ function App() {
   function enqueueChange(change: LocalChange) {
     // coalescing: 파일 modify 는 같은 경로가 이미 대기 중이면 버린다(처리 시점에 최신
     // 을 다시 읽어 올리므로 중간 버전 반복 업로드가 낭비). create/delete/rename 은
-    // 순서·의미가 있어 묶지 않는다.
+    // 순서와 의미가 있어 묶지 않는다.
     const coalesceKey =
       change.kind === "modify" && !change.isDir ? normPath(change.path) : null
     if (coalesceKey !== null) {
@@ -1092,7 +1092,7 @@ function App() {
     }
     // SSE 실시간 nudge 시작 (활성/첫 워크스페이스 기준). polling 은 fallback 으로 유지.
     connectSse(syncedWorkspaces(me, stg.excludedWorkspaces)[0] ?? null)
-    setPollStatus(`탐색기 동기화 준비 완료 · ${new Date().toLocaleTimeString()}`)
+    setPollStatus(`탐색기 동기화 준비 완료, ${new Date().toLocaleTimeString()}`)
   }
 
   // SSE 연결: 활성 워크스페이스의 node 변경 nudge 구독. 토큰은 현재 access_token.
@@ -1142,8 +1142,8 @@ function App() {
       }
       setPollStatus(
         applied > 0
-          ? `${applied}건 변경 반영 · ${new Date().toLocaleTimeString()}`
-          : `변경 없음 · ${new Date().toLocaleTimeString()}`,
+          ? `${applied}건 변경 반영, ${new Date().toLocaleTimeString()}`
+          : `변경 없음, ${new Date().toLocaleTimeString()}`,
       )
     }
 

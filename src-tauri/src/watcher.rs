@@ -9,7 +9,7 @@
 //!   - 사용자가 hydrate 된 파일 수정/신규/삭제 → emit
 //!
 //! hydrate 자기변경 회피: vfs 가 hydrate 직전 경로를 SELF_WRITES 에 등록 →
-//! 그 경로 이벤트는 잠깐 무시. (단순·견고. 더 정밀히는 Cloud Files API 의
+//! 그 경로 이벤트는 잠깐 무시. (단순, 견고. 더 정밀히는 Cloud Files API 의
 //! placeholder 상태 비트를 보지만 Phase 2 후반 과제.)
 
 use std::collections::HashMap;
@@ -23,12 +23,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 // hydrate 등 "우리가 쓰는 중" 인 경로 → 만료 시각. 그 경로 이벤트는 무시.
-// 키는 정규화 문자열: Windows 의 `\\?\` verbatim 접두·대소문자 차이로 매치가
+// 키는 정규화 문자열: Windows 의 `\\?\` verbatim 접두와 대소문자 차이로 매치가
 // 빗나가면 억제가 통째로 실패하므로(에코 업로드) norm() 으로 통일한다.
 static SELF_WRITES: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
 // hydration 진행 중 상한: 완료 훅(self_write_end)이 유실돼도 이 시간 뒤엔 억제
-// 해제(스톨·크래시 시 무한 억제 방지).
+// 해제(스톨, 크래시 시 무한 억제 방지).
 const HYDRATE_MAX: Duration = Duration::from_secs(300);
 // 완료 후 유예: 마지막 쓰기의 500ms 디바운스 + 지연 이벤트 흡수.
 const SELF_WRITE_GRACE: Duration = Duration::from_secs(3);
@@ -39,7 +39,7 @@ fn norm(path: &Path) -> String {
     s.strip_prefix(r"\\?\").unwrap_or(&s).to_lowercase()
 }
 
-/// 빠른 self-write(placeholder 생성·삭제·rename 등): 이후 몇 초간 그 경로 무시.
+/// 빠른 self-write(placeholder 생성, 삭제, rename 등): 이후 몇 초간 그 경로 무시.
 pub fn mark_self_write(path: &Path) {
     let mut guard = SELF_WRITES.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
@@ -47,7 +47,7 @@ pub fn mark_self_write(path: &Path) {
 }
 
 /// hydration 쓰기 시작 직전 호출: 완료(self_write_end)까지 길게 억제.
-/// 다운로드가 10초 넘게 걸려도(대용량·느린 회선) 완료 이벤트가 새지 않게 한다.
+/// 다운로드가 10초 넘게 걸려도(대용량, 느린 회선) 완료 이벤트가 새지 않게 한다.
 // 호출부(vfs hydrate)가 windows-gated 라 non-windows 빌드에선 dead code.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub fn self_write_begin(path: &Path) {
@@ -65,7 +65,7 @@ pub fn self_write_end(path: &Path) {
     }
 }
 
-/// 편집기·OS 가 만드는 임시/잠금 파일: sync 대상 아님.
+/// 편집기와 OS 가 만드는 임시/잠금 파일: sync 대상 아님.
 fn is_ignored(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;

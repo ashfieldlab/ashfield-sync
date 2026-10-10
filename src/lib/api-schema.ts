@@ -13,9 +13,9 @@ export interface paths {
         };
         /**
          * 현재 사용자 정보
-         * @description 신원 + 우리 DB 의 소속 워크스페이스·role.
+         * @description 신원 + 우리 DB 의 소속 워크스페이스와 role.
          *
-         *     부수효과: `users` 행 upsert, 토큰 `workspaces` 가 바뀌었으면 워크스페이스·멤버십 동기화.
+         *     부수효과: `users` 행 upsert, 토큰 `workspaces` 가 바뀌었으면 워크스페이스와 멤버십 동기화.
          *     groups: 소속 워크스페이스 ID 목록. workspaces: 같은 목록의 {id, name, account_workspace_id}
          *     (account_workspace_id = 계정 서버 워크스페이스 ID, 로컬 레거시 워크스페이스는 null).
          *     workspace_roles: 워크스페이스별 role (ADR-0010, frontend isWorkspaceAdmin 계산용).
@@ -36,7 +36,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 내 저장 사용량·한도 (활성 워크스페이스 기준) */
+        /** 내 저장 사용량과 한도 (활성 워크스페이스 기준) */
         get: operations["get_my_storage_api_v1_me_storage_get"];
         put?: never;
         post?: never;
@@ -231,7 +231,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * 휴지통 이동 (soft delete) · 보안 폴더는 즉시 영구 삭제
+         * 휴지통 이동 (soft delete), 보안 폴더는 즉시 영구 삭제
          * @description soft delete: `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.
          *
          *     진행 중 multipart 업로드는 S3 abort 시도 후 계속.
@@ -242,7 +242,7 @@ export interface paths {
         head?: never;
         /**
          * 이름 변경 / 이동
-         * @description 필드만 보낸 것만 변경. parent_id 변경 시 사이클·scope 일관 검사.
+         * @description 필드만 보낸 것만 변경. parent_id 변경 시 사이클과 scope 일관 검사.
          *
          *     Desktop sync 클라이언트가 If-Match 헤더 보내면 etag 비교: mismatch 시 412.
          */
@@ -606,7 +606,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 감사 로그 CSV 내보내기 (같은 접근·필터) */
+        /** 감사 로그 CSV 내보내기 (같은 접근과 필터) */
         get: operations["export_audit_csv_api_v1_audit_export_csv_get"];
         put?: never;
         post?: never;
@@ -695,7 +695,7 @@ export interface paths {
         /** 워크스페이스 endpoint 목록 */
         get: operations["list_endpoints_api_v1_webhooks_get"];
         put?: never;
-        /** endpoint 등록: secret 생성·1회 노출 */
+        /** endpoint 등록: secret 생성, 1회 노출 */
         post: operations["create_endpoint_api_v1_webhooks_post"];
         delete?: never;
         options?: never;
@@ -781,7 +781,7 @@ export interface paths {
         };
         /**
          * 워크스페이스 멤버 자동완성 검색
-         * @description active workspace 멤버 ILIKE 검색: email · name 매칭. 본인은 결과에서 제외.
+         * @description active workspace 멤버 ILIKE 검색: email, name 매칭. 본인은 결과에서 제외.
          *
          *     q 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).
          *     캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.
@@ -2339,7 +2339,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description JWT 없음·만료·서명·iss·aud 불일치 */
+            /** @description JWT 없음, 만료, 서명, iss, aud 불일치 */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3732,7 +3732,7 @@ export interface operations {
                     "application/json": components["schemas"]["NodeResponse"];
                 };
             };
-            /** @description 업로드·교체가 진행 중인 파일 */
+            /** @description 업로드나 교체가 진행 중인 파일 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -4662,7 +4662,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description 연결·인증 실패 */
+            /** @description 연결, 인증 실패 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4853,7 +4853,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description 연결·인증 실패 */
+            /** @description 연결, 인증 실패 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5718,7 +5718,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 링크 없음·만료·철회 */
+            /** @description 링크 없음, 만료, 철회 */
             404: {
                 headers: {
                     [name: string]: unknown;

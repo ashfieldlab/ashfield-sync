@@ -79,10 +79,10 @@
 
 <h1>Ashfield Sync: 설계 결정</h1>
 <p class="meta">
-  ADR-0015 (2026-06-12 결정) 의 grilling 정리 · 원문: <code>ashfield-drive/docs/adr/0015-desktop-client.md</code><br>
-  로그인: Keycloak → Ashfield 계정 서버로 교체 (2026-10) · 계약: <code>ashfield-account/docs/adr/0001-account-server-contract.md</code><br>
-  배경: 웹 브라우저 단독 파일 접근의 다운로드–편집–업로드 사이클 불편 (HWP 라운드트립 · 큰 파일 · 오프라인)<br>
-  <b>상태 (2026-06-13): Phase 1·2·3 완료 (Authenticode 서명만 보류). 양방향 sync(크기 무관) + 트레이 상주 + 온보딩 + 자동 업데이트 + SSE + OpenAPI 자동생성, Windows 실기기 검증.</b>
+  ADR-0015 (2026-06-12 결정) 의 grilling 정리, 원문: <code>ashfield-drive/docs/adr/0015-desktop-client.md</code><br>
+  로그인: Keycloak → Ashfield 계정 서버로 교체 (2026-10), 계약: <code>ashfield-account/docs/adr/0001-account-server-contract.md</code><br>
+  배경: 웹 브라우저 단독 파일 접근의 다운로드–편집–업로드 사이클 불편 (HWP 라운드트립, 큰 파일, 오프라인)<br>
+  <b>상태 (2026-06-13): Phase 1, 2, 3 완료 (Authenticode 서명만 보류). 양방향 sync(크기 무관) + 트레이 상주 + 온보딩 + 자동 업데이트 + SSE + OpenAPI 자동생성, Windows 실기기 검증.</b>
 </p>
 
 <h2>결정 12개</h2>
@@ -105,14 +105,14 @@
     <span class="badge done">완료</span>
     <h3><span class="num">3</span>Cloud Files API: Files On-Demand</h3>
     <p><span class="pick">Windows native VFS.</span> placeholder (수 KB) → 열면 hydrate (1MB 스트리밍 CfExecute). FUSE/WebDAV mount 의 quirk 회피.</p>
-    <p>구현: CfRegisterSyncRoot(E1) · CfCreatePlaceholders(E2) · FETCH_DATA 콜백 hydrate(E3) · polling 연동(E4) · 자동 bootstrap(E5). 428MB 파일도 로컬처럼 열림 검증.</p>
+    <p>구현: CfRegisterSyncRoot(E1), CfCreatePlaceholders(E2), FETCH_DATA 콜백 hydrate(E3), polling 연동(E4), 자동 bootstrap(E5). 428MB 파일도 로컬처럼 열림 검증.</p>
   </div>
 
   <div class="card">
     <span class="badge done">완료</span>
     <h3><span class="num">4</span>OAuth 2.1 + PKCE: Ashfield 계정 서버 SSO</h3>
-    <p><span class="pick">App Token paste 패턴 회피.</span> 시스템 브라우저 → Ashfield 계정 서버(<code>/api/auth/oauth2/authorize</code>, 디스커버리로 확인) → loopback callback (<code>http://127.0.0.1:1421/oauth/callback</code>, 등록값과 정확히 일치) → token 교환. public client <code>ashfield-sync</code> (secret 없음, PKCE S256 · state · nonce · <code>iss</code> 확인). refresh_token 은 Windows Credential Manager.</p>
-    <p><span class="pick"><code>resource</code> = Drive public URL.</span> authorize·token·refresh 모두 <code>resource=&lt;VITE_DRIVE_RESOURCE&gt;</code>: 그래야 access token 이 JWT(<code>aud</code> ∋ Drive URL)로 나와 Drive 백엔드가 JWKS 로 검증. scope <code>openid profile email offline_access</code>. 계약: <code>ashfield-account/docs/adr/0001-account-server-contract.md</code> (Keycloak 대체).</p>
+    <p><span class="pick">App Token paste 패턴 회피.</span> 시스템 브라우저 → Ashfield 계정 서버(<code>/api/auth/oauth2/authorize</code>, 디스커버리로 확인) → loopback callback (<code>http://127.0.0.1:1421/oauth/callback</code>, 등록값과 정확히 일치) → token 교환. public client <code>ashfield-sync</code> (secret 없음, PKCE S256, state, nonce, <code>iss</code> 확인). refresh_token 은 Windows Credential Manager.</p>
+    <p><span class="pick"><code>resource</code> = Drive public URL.</span> authorize, token, refresh 모두 <code>resource=&lt;VITE_DRIVE_RESOURCE&gt;</code>: 그래야 access token 이 JWT(<code>aud</code> ∋ Drive URL)로 나와 Drive 백엔드가 JWKS 로 검증. scope <code>openid profile email offline_access</code>. 계약: <code>ashfield-account/docs/adr/0001-account-server-contract.md</code> (Keycloak 대체).</p>
     <p>App Password 는 headless / 표준 프로토콜용 탈출구: GUI 클라이언트는 OAuth 정공.</p>
   </div>
 
@@ -120,14 +120,14 @@
     <span class="badge done">완료</span>
     <h3><span class="num">5</span>access_token 자동 refresh</h3>
     <p><span class="pick">401 → single-flight refresh → 재시도 1회.</span> refresh 실패 (revoked / SSO 종료) 시 "세션 만료" 안내 + 로그인 화면 복귀.</p>
-    <p><span class="pick">refresh_token 회전 · 재사용 감지.</span> 갱신마다 새 refresh_token 을 keychain 에 저장. 옛 값을 다시 쓰면 계정 서버가 토큰 패밀리 전체를 폐기하므로, UI(401) · SSE 재연결 · VFS hydrate 스레드의 갱신을 Rust <code>oauth.rs</code> 한 곳(락 + 공용 access token 캐시)으로 직렬화. SSE 는 401 이면 새 토큰으로 즉시 재연결. 로그아웃 = <code>revocation_endpoint</code> 로 refresh_token 폐기 + keychain 삭제.</p>
+    <p><span class="pick">refresh_token 회전, 재사용 감지.</span> 갱신마다 새 refresh_token 을 keychain 에 저장. 옛 값을 다시 쓰면 계정 서버가 토큰 패밀리 전체를 폐기하므로, UI(401), SSE 재연결, VFS hydrate 스레드의 갱신을 Rust <code>oauth.rs</code> 한 곳(락 + 공용 access token 캐시)으로 직렬화. SSE 는 401 이면 새 토큰으로 즉시 재연결. 로그아웃 = <code>revocation_endpoint</code> 로 refresh_token 폐기 + keychain 삭제.</p>
   </div>
 
   <div class="card">
     <span class="badge done">완료</span>
     <h3><span class="num">6</span>양방향 sync + 충돌 사본</h3>
     <p><span class="pick">ETag (<code>If-Match</code>) optimistic locking.</span> 로컬 변경(notify watcher)을 직렬 큐로 backend 반영: 신규/수정/삭제/이름변경.</p>
-    <p>구현: F0 overwrite API(write-to-new-key+swap) · F1 watcher(self-write 로 hydrate 자기변경 무시) · F2 업로드 · F3 충돌 사본 <code>foo (충돌본 2026-06-13 PC명).docx</code> · A 대용량 multipart 업로드. 작은 파일·큰 파일·신규·수정 전부 양방향 대칭.</p>
+    <p>구현: F0 overwrite API(write-to-new-key+swap), F1 watcher(self-write 로 hydrate 자기변경 무시), F2 업로드, F3 충돌 사본 <code>foo (충돌본 2026-06-13 PC명).docx</code>, A 대용량 multipart 업로드. 작은 파일, 큰 파일, 신규, 수정 전부 양방향 대칭.</p>
   </div>
 
   <div class="card">
@@ -179,28 +179,28 @@
 
 <h2>Phase 로드맵</h2>
 <div class="progress">
-  <div class="step"><b>Phase 1: POC ✅</b>OAuth ✓ · 자동 refresh ✓ · tree ✓ · 설정 저장 ✓ · delta polling ✓ · VFS placeholder + hydrate ✓</div>
-  <div class="step"><b>Phase 2: 양방향 ✅</b>로컬 변경 감지 ✓ · 양방향 sync ✓ · 충돌 사본 ✓ · 대용량 multipart 업로드 ✓ &nbsp;(남음: OpenAPI contract)</div>
-  <div class="step"><b>Phase 3: 외부 배포 ✅</b>트레이 상주 ✓ · 온보딩 마법사 ✓ · 자동 업데이트(minisign) ✓ · SSE nudge ✓ · OpenAPI 타입 자동생성 ✓ · 커스텀 타이틀바 ✓ &nbsp;(보류: Authenticode 서명)</div>
-  <div class="step"><b>Phase 4: SaaS</b>Multi-workspace UI · 다국어 · Sentry · device registration</div>
+  <div class="step"><b>Phase 1: POC ✅</b>OAuth ✓, 자동 refresh ✓, tree ✓, 설정 저장 ✓, delta polling ✓, VFS placeholder + hydrate ✓</div>
+  <div class="step"><b>Phase 2: 양방향 ✅</b>로컬 변경 감지 ✓, 양방향 sync ✓, 충돌 사본 ✓, 대용량 multipart 업로드 ✓ &nbsp;(남음: OpenAPI contract)</div>
+  <div class="step"><b>Phase 3: 외부 배포 ✅</b>트레이 상주 ✓, 온보딩 마법사 ✓, 자동 업데이트(minisign) ✓, SSE nudge ✓, OpenAPI 타입 자동생성 ✓, 커스텀 타이틀바 ✓ &nbsp;(보류: Authenticode 서명)</div>
+  <div class="step"><b>Phase 4: SaaS</b>Multi-workspace UI, 다국어, Sentry, device registration</div>
 </div>
 
 <h2>대안 비교 (원 ADR)</h2>
 <table>
   <tr><th>옵션</th><th>우리 작업</th><th>UX</th><th>한계</th></tr>
-  <tr><td>WebDAV proxy mount</td><td>1주</td><td>OS mount, 익숙</td><td>binary 서버 통과 · 동시 협업 X · OS quirks</td></tr>
+  <tr><td>WebDAV proxy mount</td><td>1주</td><td>OS mount, 익숙</td><td>binary 서버 통과, 동시 협업 X, OS quirks</td></tr>
   <tr><td>WebDAV Hybrid (S3 redirect)</td><td>1주</td><td>rclone mount</td><td>PUT redirect 호환성 ↓</td></tr>
-  <tr><td>Nextcloud Desktop fork</td><td>2–3개월</td><td>VFS + overlay 완비</td><td>GPL viral · server 호환 layer · 도메인 불일치</td></tr>
-  <tr><td>rclone wrapper</td><td>2–3주</td><td>mount / 주기 sync</td><td>VFS X · overlay X</td></tr>
-  <tr><td><b>Tauri + Cloud Files API (결정)</b></td><td><b>2.5개월 (MVP)</b></td><td><b>OneDrive 수준 native</b></td><td>Windows-only · signing 셋업</td></tr>
+  <tr><td>Nextcloud Desktop fork</td><td>2–3개월</td><td>VFS + overlay 완비</td><td>GPL viral, server 호환 layer, 도메인 불일치</td></tr>
+  <tr><td>rclone wrapper</td><td>2–3주</td><td>mount / 주기 sync</td><td>VFS X, overlay X</td></tr>
+  <tr><td><b>Tauri + Cloud Files API (결정)</b></td><td><b>2.5개월 (MVP)</b></td><td><b>OneDrive 수준 native</b></td><td>Windows-only, signing 셋업</td></tr>
 </table>
 
 <h2>보안 메모</h2>
 <table>
   <tr><th>항목</th><th>방식</th></tr>
   <tr><td>refresh_token 보관</td><td>Windows Credential Manager (OS 암호화, 사용자 격리): JS 메모리/디스크 노출 X</td></tr>
-  <tr><td>refresh_token 회전</td><td>갱신마다 새 값 저장 · 갱신은 프로세스 전체 직렬화 (재사용 시 패밀리 폐기 방지) · <code>invalid_grant</code> 면 keychain 삭제 후 재로그인</td></tr>
-  <tr><td>access_token</td><td>JWT (RS256, <code>aud</code> ∋ Drive public URL) · 메모리만 (Rust 공용 캐시 + JS) · TTL 15분 · 만료 시 자동 refresh</td></tr>
+  <tr><td>refresh_token 회전</td><td>갱신마다 새 값 저장, 갱신은 프로세스 전체 직렬화 (재사용 시 패밀리 폐기 방지), <code>invalid_grant</code> 면 keychain 삭제 후 재로그인</td></tr>
+  <tr><td>access_token</td><td>JWT (RS256, <code>aud</code> ∋ Drive public URL), 메모리만 (Rust 공용 캐시 + JS), TTL 15분, 만료 시 자동 refresh</td></tr>
   <tr><td>PKCE</td><td>code 탈취 후 재사용 차단: verifier 는 앱 메모리에만, 계정 서버는 SHA256 해시(challenge)만 봄</td></tr>
   <tr><td>cache 폴더</td><td><code>%LOCALAPPDATA%\Ashfield\cache\</code>: OS user 권한 격리</td></tr>
   <tr><td>권한 회수</td><td>delta 의 <code>access_revoked</code> → placeholder + cache 즉시 삭제</td></tr>
@@ -208,15 +208,15 @@
 
 <h2>E2E 보안 폴더 (Vault, ADR-0016)</h2>
 <p class="meta" style="margin-bottom:16px">
-  특정 폴더를 봉투 암호화: 개발자·관리자조차 못 봄. 키 체인:
+  특정 폴더를 봉투 암호화: 개발자와 관리자조차 못 봄. 키 체인:
   <code>비밀번호 ─argon2id→ KEK ─AES→ 개인키 ─RSA→ vault_key ─AES→ {파일명,DEK} ─AES→ 파일</code>.
-  서버는 암호 연산 0, 불투명 blob·ciphertext 이름만 보관. 싱크는 web 과 동일 봉투를 재사용.
+  서버는 암호 연산 0, 불투명 blob과 ciphertext 이름만 보관. 싱크는 web 과 동일 봉투를 재사용.
 </p>
 <div class="grid">
   <div class="card">
     <span class="badge done">완료</span>
-    <h3>V5a: 이름 복호화 · 구조 유지</h3>
-    <p>잠금해제 시 vault 파일/폴더명을 복호화해 표시(잠김=내용 숨김, 루트만). <span class="pick">prune 은 startup·잠금토글 시 1회만</span>: 매 sync 마다 돌면 막 만든 미업로드 로컬파일이 날아가는 레이스가 생겨 금지.</p>
+    <h3>V5a: 이름 복호화, 구조 유지</h3>
+    <p>잠금해제 시 vault 파일/폴더명을 복호화해 표시(잠김=내용 숨김, 루트만). <span class="pick">prune 은 startup과 잠금토글 시 1회만</span>: 매 sync 마다 돌면 막 만든 미업로드 로컬파일이 날아가는 레이스가 생겨 금지.</p>
   </div>
   <div class="card">
     <span class="badge done">완료</span>
@@ -226,12 +226,12 @@
   <div class="card">
     <span class="badge done">완료</span>
     <h3>V5c: 암호화 업로드 (편집 지원)</h3>
-    <p>싱크의 목적은 편한 편집: vault 도 써야 함. <code>vfs_encrypt_to_temp</code> 가 평문을 <code>[iv][ct][tag]</code> temp 로 암호화 → 기존 업로드 머신(single/multipart) 재사용. create/modify(+wrapped_dek) · rename(암호화 이름) · delete. <span class="pick">평문은 이름·내용 모두 서버로 안 나감.</span></p>
+    <p>싱크의 목적은 편한 편집: vault 도 써야 함. <code>vfs_encrypt_to_temp</code> 가 평문을 <code>[iv][ct][tag]</code> temp 로 암호화 → 기존 업로드 머신(single/multipart) 재사용. create/modify(+wrapped_dek), rename(암호화 이름), delete. <span class="pick">평문은 이름과 내용 모두 서버로 안 나감.</span></p>
   </div>
   <div class="card">
     <span class="badge todo">남음</span>
-    <h3>V6: 공유 · 복구 · 표시</h3>
-    <p>공유(타인 공개키로 vault_key wrap) · 복구코드 생성/표시 · plain_size 표시(현재 vault 파일 크기가 암호문 +28B 로 보임).</p>
+    <h3>V6: 공유, 복구, 표시</h3>
+    <p>공유(타인 공개키로 vault_key wrap), 복구코드 생성/표시, plain_size 표시(현재 vault 파일 크기가 암호문 +28B 로 보임).</p>
   </div>
 </div>
 
@@ -240,13 +240,13 @@
   <tr><th>항목</th><th>현재</th><th>재검토 방향</th></tr>
   <tr>
     <td><b>임시파일 무시 휴리스틱</b><br><code>watcher::is_ignored</code></td>
-    <td>파일<b>명 패턴</b>만으로 판단: <code>~$</code>·<code>.~lock.</code>·<code>.tmp</code>·<code>.swp</code>·<code>.crdownload</code>·<code>.part</code>·<code>.DS_Store</code>·<code>Thumbs.db</code>. 내용·상태가 아니라 이름 추측.</td>
-    <td><b>정확하지 않음: 재설계 필요.</b> ① 목록에 없는 임시패턴 놓침(<code>~문서.docx</code>·<code>.bak</code>·편집기별 랜덤 임시명·atomic-save temp). ② 사용자가 진짜 <code>메모.tmp</code> 로 지으면 동기화 누락. 후보: 편집기 atomic-save 실관찰 후 패턴 보강 / debounce 안정화 후 최종본만 / 무시목록 사용자 설정화.</td>
+    <td>파일<b>명 패턴</b>만으로 판단: <code>~$</code>, <code>.~lock.</code>, <code>.tmp</code>, <code>.swp</code>, <code>.crdownload</code>, <code>.part</code>, <code>.DS_Store</code>, <code>Thumbs.db</code>. 내용과 상태가 아니라 이름 추측.</td>
+    <td><b>정확하지 않음: 재설계 필요.</b> ① 목록에 없는 임시패턴 놓침(<code>~문서.docx</code>, <code>.bak</code>, 편집기별 랜덤 임시명, atomic-save temp). ② 사용자가 진짜 <code>메모.tmp</code> 로 지으면 동기화 누락. 후보: 편집기 atomic-save 실관찰 후 패턴 보강 / debounce 안정화 후 최종본만 / 무시목록 사용자 설정화.</td>
   </tr>
   <tr>
     <td><b>vault 파일 크기 상한</b></td>
     <td>200MB 초과 거부(상태줄 안내). whole-file AES-GCM = 평문+암호문 통째 메모리(~2배), 매 저장 전체 재업로드.</td>
-    <td>거부된 큰 파일이 로컬에만 남아 <b>다음 startup prune 에 삭제</b>될 수 있음(놀람). prune 제외 또는 vault 밖 이동 안내 보완. 대용량 필요 시 청크/프레임 AEAD(스트리밍·랜덤액세스, 포맷 변경)로 전환.</td>
+    <td>거부된 큰 파일이 로컬에만 남아 <b>다음 startup prune 에 삭제</b>될 수 있음(놀람). prune 제외 또는 vault 밖 이동 안내 보완. 대용량 필요 시 청크/프레임 AEAD(스트리밍과 랜덤액세스, 포맷 변경)로 전환.</td>
   </tr>
   <tr>
     <td><b>평문 hydrate 잔재</b></td>
@@ -260,7 +260,7 @@
   </tr>
 </table>
 
-<h2>메인 화면 · 운영 메모</h2>
+<h2>메인 화면과 운영 메모</h2>
 <div class="grid">
   <div class="card">
     <h3>메인 창 구성 (개편)</h3>
@@ -270,13 +270,13 @@
   </div>
   <div class="card">
     <h3>dev vs build: 빈 화면 함정</h3>
-    <p><code>target\debug\*.exe</code> 는 UI 를 <b>dev 서버(localhost)에서 로드</b>. 단독 실행(부팅·트레이·더블클릭)하면 dev 서버가 없어 <code>ERR_CONNECTION_REFUSED</code> 빈 화면.</p>
+    <p><code>target\debug\*.exe</code> 는 UI 를 <b>dev 서버(localhost)에서 로드</b>. 단독 실행(부팅, 트레이, 더블클릭)하면 dev 서버가 없어 <code>ERR_CONNECTION_REFUSED</code> 빈 화면.</p>
     <p><span class="pick">개발=<code>npm run tauri dev</code></span> (Vite+exe 동반). <span class="pick">단독 실행 앱=<code>npm run tauri build</code></span> (프론트 번들). <b>autostart 는 release 빌드만 등록</b>: debug 는 <code>disable()</code> 로 잘못 등록된 부팅 시작도 정리.</p>
   </div>
 </div>
 
 <footer>
-  ashfield-sync · 원본 결정 문서: ashfield-drive/docs/adr/0015-desktop-client.md · ADR-0016(E2E vault) · 갱신: 2026-06-14 (Phase 1·2·3 + E2E vault V5a/b/c, DB 암호화 검증, 메인 UI 개편(상태카드·활동피드·폴더열기), dev/build·autostart 정리. 재검토: 임시파일 휴리스틱)
+  ashfield-sync, 원본 결정 문서: ashfield-drive/docs/adr/0015-desktop-client.md, ADR-0016(E2E vault), 갱신: 2026-06-14 (Phase 1, 2, 3 + E2E vault V5a/b/c, DB 암호화 검증, 메인 UI 개편(상태카드, 활동피드, 폴더열기), dev/build와 autostart 정리. 재검토: 임시파일 휴리스틱)
 </footer>
 
 </div>
