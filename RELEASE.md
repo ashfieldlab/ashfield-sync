@@ -27,6 +27,20 @@ npm run tauri build
 `createUpdaterArtifacts: true` 라 빌드 산출물에 설치 파일(`.msi` / `-setup.exe`)과
 각각의 `.sig` 가 생성됨 (`src-tauri/target/release/bundle/`).
 
+## 로그인 설정 (빌드 시 고정)
+
+로그인은 Ashfield 계정 서버(OIDC)로 한다 — Keycloak 아님. 계약:
+`ashfield-account/docs/adr/0001-account-server-contract.md`.
+`VITE_*` 값은 빌드 때 박히므로 릴리스 빌드 전에 `.env` 를 운영 값으로:
+
+| 변수 | 운영 예 | 비고 |
+|---|---|---|
+| `VITE_ACCOUNT_URL` | `https://account.example.com` | 계정 서버 issuer (디스커버리) |
+| `VITE_DRIVE_URL` | `https://drive.example.com` | Drive API base — `capabilities/default.json` allowlist 에도 추가 |
+| `VITE_DRIVE_RESOURCE` | `https://drive.example.com` | 계정 서버의 `DRIVE_URL` · Drive 백엔드의 `AUTH_AUDIENCE` 와 **정확히** 같게 |
+| `VITE_OAUTH_CLIENT_ID` | `ashfield-sync` | |
+| `VITE_OAUTH_REDIRECT_PORT` | `1421` | 계정 서버 `SYNC_REDIRECT_URIS` 에 `http://127.0.0.1:1421/oauth/callback` 등록 필요 |
+
 ## 배포 (GitHub Releases)
 
 업데이트 endpoint:

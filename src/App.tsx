@@ -174,11 +174,11 @@ function App() {
 
   // 부팅 — 401 자동 refresh handler 주입 + 저장된 refresh_token 있으면 자동 로그인
   useEffect(() => {
-    setRefreshHandler(async () => {
-      const tokens = await oauthRefresh()
+    // 갱신은 Rust 가 직렬화(single-flight) — SSE·VFS 도 같은 캐시를 쓰므로 SSE 재연결 불필요
+    // (SSE 는 401 이면 스스로 새 토큰을 받아 재연결한다).
+    setRefreshHandler(async (stale) => {
+      const tokens = await oauthRefresh(stale)
       setToken(tokens.access_token)
-      // SSE 연결도 새 토큰으로 갱신 — 재연결 시 stale 토큰 401 방지
-      if (activeCompanyRef.current) connectSse(activeCompanyRef.current)
     })
     void (async () => {
       try {
@@ -222,6 +222,19 @@ function App() {
     })
     return () => {
       if (timer) clearTimeout(timer)
+      void unlisten.then((fn) => fn())
+    }
+  }, [])
+
+  // SSE 가 401 후 refresh 까지 실패(refresh_token 만료·폐기·재사용 감지) — 세션 만료, 로그인 화면으로.
+  useEffect(() => {
+    const unlisten = listen<string>("auth-expired", (ev) => {
+      console.warn("[auth] expired", ev.payload)
+      setToken(null)
+      setActiveCompany(null)
+      setState({ ...INITIAL_STATE, error: "세션이 만료되었습니다. Ashfield 계정으로 다시 로그인해주세요." })
+    })
+    return () => {
       void unlisten.then((fn) => fn())
     }
   }, [])
@@ -1062,11 +1075,8 @@ function App() {
     try {
       await invoke("vfs_connect", {
         syncRoot: stg.syncRoot,
-        config: {
-          apiUrl: env.apiUrl,
-          issuer: env.oauth.issuer,
-          clientId: env.oauth.clientId,
-        },
+        // 토큰은 Rust oauth 모듈의 공용 캐시에서 (로그인/refresh 가 설정을 이미 넘김)
+        config: { apiUrl: env.apiUrl },
       })
     } catch (err) {
       console.warn("[vfs] connect", err)
@@ -1275,7 +1285,7 @@ function App() {
     // 4) 설정 리셋
     await resetSettings()
     setSettings(await getSettings())
-    // 5) keychain/Keycloak 로그아웃 + 상태 초기화
+    // 5) refresh_token 폐기(계정 서버 revoke) + keychain 삭제 + 상태 초기화
     try { await oauthLogout() } catch { /* noop */ }
     vfsMapRef.current.clear()
     pathIndexRef.current.clear()
@@ -1363,10 +1373,10 @@ function App() {
           <p className="subtitle">백엔드: <code>{env.apiUrl}</code></p>
           <div className="login">
             <p style={{ fontSize: "13px", color: "#666", marginBottom: "16px" }}>
-              아래 버튼을 누르면 브라우저가 열려 로그인합니다.
+              아래 버튼을 누르면 브라우저가 열려 Ashfield 계정으로 로그인합니다.
             </p>
             <button onClick={handleLogin} disabled={state.loading}>
-              {state.loading ? "로그인 중..." : "로그인"}
+              {state.loading ? "로그인 중..." : "Ashfield 계정으로 로그인"}
             </button>
           </div>
           {state.error && <pre className="error">{state.error}</pre>}

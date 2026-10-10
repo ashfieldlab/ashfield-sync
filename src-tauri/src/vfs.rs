@@ -29,14 +29,11 @@ pub struct PlaceholderFile {
 #[serde(rename_all = "camelCase")]
 pub struct ConnectConfig {
     pub api_url: String,
-    pub issuer: String,
-    pub client_id: String,
 }
 
 #[cfg(windows)]
 mod imp {
     use std::sync::{Mutex, OnceLock};
-    use std::time::Instant;
 
     use windows::core::{GUID, HSTRING, PCWSTR};
     use windows::Win32::Foundation::{STATUS_SUCCESS, STATUS_UNSUCCESSFUL};
@@ -58,11 +55,11 @@ mod imp {
 
     // ---------------------------------------------------------------------
     // Hydration 컨텍스트 — callback (OS 스레드) 이 backend 호출에 필요한 것들.
-    // OnceLock: 첫 connect 시 설정. access_token 은 4분 캐시 후 자체 refresh.
+    // OnceLock: 첫 connect 시 설정. access_token 은 oauth 모듈의 공용 캐시에서 받는다
+    // (refresh_token 회전 — VFS 가 따로 refresh 하면 JS/SSE 와 경쟁해 패밀리가 폐기된다).
     // ---------------------------------------------------------------------
     struct HydrationCtx {
         config: ConnectConfig,
-        token: Mutex<Option<(String, Instant)>>,
     }
 
     static CTX: OnceLock<HydrationCtx> = OnceLock::new();
@@ -106,52 +103,13 @@ mod imp {
     }
 
     #[derive(serde::Deserialize)]
-    struct TokenRes {
-        access_token: String,
-        refresh_token: String,
-    }
-
-    #[derive(serde::Deserialize)]
     struct DownloadUrlRes {
         url: String,
     }
 
-    /// keyring 의 refresh_token 으로 access_token 확보 (blocking — worker 스레드 전용).
-    fn get_access_token(ctx: &HydrationCtx) -> Result<String, String> {
-        {
-            let cached = ctx.token.lock().unwrap();
-            if let Some((tok, at)) = cached.as_ref() {
-                if at.elapsed().as_secs() < 240 {
-                    return Ok(tok.clone());
-                }
-            }
-        }
-        let entry = keyring::Entry::new(
-            crate::oauth::KEYRING_SERVICE,
-            crate::oauth::KEYRING_USERNAME,
-        )
-        .map_err(|e| format!("keyring: {e}"))?;
-        let refresh = entry
-            .get_password()
-            .map_err(|e| format!("refresh_token 없음: {e}"))?;
-
-        let token_url = format!("{}/protocol/openid-connect/token", ctx.config.issuer);
-        let res = reqwest::blocking::Client::new()
-            .post(&token_url)
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("client_id", ctx.config.client_id.as_str()),
-                ("refresh_token", refresh.as_str()),
-            ])
-            .send()
-            .map_err(|e| format!("refresh POST: {e}"))?;
-        if !res.status().is_success() {
-            return Err(format!("refresh 거부: {}", res.status()));
-        }
-        let tok: TokenRes = res.json().map_err(|e| format!("token parse: {e}"))?;
-        entry.set_password(&tok.refresh_token).ok();
-        *ctx.token.lock().unwrap() = Some((tok.access_token.clone(), Instant::now()));
-        Ok(tok.access_token)
+    /// 유효한 access token (blocking — worker 스레드 전용). refresh 는 oauth 모듈이 직렬화.
+    fn get_access_token(stale: Option<&str>) -> Result<String, String> {
+        crate::oauth::access_token_blocking(stale)
     }
 
     // ---------------------------------------------------------------------
@@ -286,19 +244,26 @@ mod imp {
             .split_once('\n')
             .ok_or("identity 형식 오류 (재 populate 필요 — 옛 placeholder)")?;
 
-        let token = get_access_token(ctx)?;
         let client = reqwest::blocking::Client::new();
 
-        // 1. presigned URL
-        let res = client
-            .post(format!(
-                "{}/api/v1/nodes/{}/download-url",
-                ctx.config.api_url, node_id
-            ))
-            .bearer_auth(&token)
-            .header("X-Active-Company-Id", urlencoding::encode(company).as_ref())
-            .send()
-            .map_err(|e| format!("download-url POST: {e}"))?;
+        // 1. presigned URL — 401 이면 토큰 갱신 후 한 번 재시도
+        let download_url = |token: &str| {
+            client
+                .post(format!(
+                    "{}/api/v1/nodes/{}/download-url",
+                    ctx.config.api_url, node_id
+                ))
+                .bearer_auth(token)
+                .header("X-Active-Company-Id", urlencoding::encode(company).as_ref())
+                .send()
+                .map_err(|e| format!("download-url POST: {e}"))
+        };
+        let token = get_access_token(None)?;
+        let mut res = download_url(&token)?;
+        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let token = get_access_token(Some(&token))?;
+            res = download_url(&token)?;
+        }
         if !res.status().is_success() {
             return Err(format!("download-url {}", res.status()));
         }
@@ -388,10 +353,7 @@ mod imp {
         if CONNECTION.lock().unwrap().is_some() {
             return Ok(());
         }
-        let _ = CTX.set(HydrationCtx {
-            config,
-            token: Mutex::new(None),
-        });
+        let _ = CTX.set(HydrationCtx { config });
         let path = HSTRING::from(sync_root);
         let result = unsafe {
             CfConnectSyncRoot(

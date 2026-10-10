@@ -5,7 +5,8 @@
  * X-Active-Company-Id 헤더 자동 첨부 — 한글 회사 ID 면 percent-encode.
  *
  * 401 처리: 등록된 refresh handler 를 single-flight 로 한 번 호출 후 재시도.
- * (Keycloak access_token TTL ~5분 — 만료가 일상이라 자동 갱신 필수.)
+ * (계정 서버 access_token TTL 15분 — 만료가 일상이라 자동 갱신 필수.
+ *  refresh_token 회전 때문에 실제 refresh 는 Rust oauth.rs 가 프로세스 전체에서 직렬화.)
  *
  * Tauri 의 native fetch (Rust reqwest) 사용 — WebView 의 브라우저 fetch 가
  * 아니라 OS 레벨 HTTP. CORS 가 적용되지 않아 dev (localhost:1420) 에서도
@@ -20,8 +21,8 @@ let _token: string | null = null
 let _activeCompanyId: string | null = null
 
 // 401 시 호출할 갱신 함수 — oauth 모듈이 부팅 때 주입 (순환 import 회피).
-// 성공 시 내부에서 setToken 까지 끝내야 함.
-let _refreshHandler: (() => Promise<void>) | null = null
+// 인자 = 401 을 받은 토큰(stale). 성공 시 내부에서 setToken 까지 끝내야 함.
+let _refreshHandler: ((stale: string | null) => Promise<void>) | null = null
 // single-flight — 동시 401 여러 개가 떠도 refresh 는 한 번만.
 let _refreshInFlight: Promise<void> | null = null
 
@@ -41,14 +42,14 @@ export function getToken(): string | null {
   return _token
 }
 
-export function setRefreshHandler(handler: (() => Promise<void>) | null): void {
+export function setRefreshHandler(handler: ((stale: string | null) => Promise<void>) | null): void {
   _refreshHandler = handler
 }
 
-async function runRefreshOnce(): Promise<void> {
+async function runRefreshOnce(stale: string | null): Promise<void> {
   if (!_refreshHandler) throw new Error("no refresh handler")
   if (!_refreshInFlight) {
-    _refreshInFlight = _refreshHandler().finally(() => {
+    _refreshInFlight = _refreshHandler(stale).finally(() => {
       _refreshInFlight = null
     })
   }
@@ -102,13 +103,15 @@ async function doFetch(path: string, options: ApiOptions): Promise<Response> {
 }
 
 export async function api<T = unknown>(path: string, options: ApiOptions = {}): Promise<T> {
+  const sentWith = _token
   let res = await doFetch(path, options)
 
   // access_token 만료 — refresh 한 번 후 재시도. refresh 자체가 실패하면
   // (revoked / 만료) 원래 401 을 그대로 던져 호출측이 로그인 화면으로 보냄.
   if (res.status === 401 && _refreshHandler) {
     try {
-      await runRefreshOnce()
+      // 요청 뒤에 이미 다른 호출이 토큰을 바꿨으면 refresh 없이 새 토큰으로 재시도만.
+      if (_token === sentWith) await runRefreshOnce(sentWith)
       res = await doFetch(path, options)
     } catch {
       // refresh 실패 — 아래에서 원래 401 throw

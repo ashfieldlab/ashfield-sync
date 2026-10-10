@@ -80,6 +80,7 @@
 <h1>Ashfield Sync — 설계 결정</h1>
 <p class="meta">
   ADR-0015 (2026-06-12 결정) 의 grilling 정리 · 원문: <code>ashfield-drive/docs/adr/0015-desktop-client.md</code><br>
+  로그인: Keycloak → Ashfield 계정 서버로 교체 (2026-10) · 계약: <code>ashfield-account/docs/adr/0001-account-server-contract.md</code><br>
   배경: 웹 브라우저 단독 파일 접근의 다운로드–편집–업로드 사이클 불편 (HWP 라운드트립 · 큰 파일 · 오프라인)<br>
   <b>상태 (2026-06-13): Phase 1·2·3 완료 (Authenticode 서명만 보류). 양방향 sync(크기 무관) + 트레이 상주 + 온보딩 + 자동 업데이트 + SSE + OpenAPI 자동생성, Windows 실기기 검증.</b>
 </p>
@@ -109,8 +110,9 @@
 
   <div class="card">
     <span class="badge done">완료</span>
-    <h3><span class="num">4</span>OAuth + PKCE — Keycloak SSO 일관</h3>
-    <p><span class="pick">App Token paste 패턴 회피.</span> 시스템 브라우저 → Keycloak → loopback callback (<code>localhost:1421</code>) → token 교환. refresh_token 은 Windows Credential Manager.</p>
+    <h3><span class="num">4</span>OAuth 2.1 + PKCE — Ashfield 계정 서버 SSO</h3>
+    <p><span class="pick">App Token paste 패턴 회피.</span> 시스템 브라우저 → Ashfield 계정 서버(<code>/api/auth/oauth2/authorize</code>, 디스커버리로 확인) → loopback callback (<code>http://127.0.0.1:1421/oauth/callback</code>, 등록값과 정확히 일치) → token 교환. public client <code>ashfield-sync</code> (secret 없음, PKCE S256 · state · nonce · <code>iss</code> 확인). refresh_token 은 Windows Credential Manager.</p>
+    <p><span class="pick"><code>resource</code> = Drive public URL.</span> authorize·token·refresh 모두 <code>resource=&lt;VITE_DRIVE_RESOURCE&gt;</code> — 그래야 access token 이 JWT(<code>aud</code> ∋ Drive URL)로 나와 Drive 백엔드가 JWKS 로 검증. scope <code>openid profile email offline_access</code>. 계약: <code>ashfield-account/docs/adr/0001-account-server-contract.md</code> (Keycloak 대체).</p>
     <p>App Password 는 headless / 표준 프로토콜용 탈출구 — GUI 클라이언트는 OAuth 정공.</p>
   </div>
 
@@ -118,6 +120,7 @@
     <span class="badge done">완료</span>
     <h3><span class="num">5</span>access_token 자동 refresh</h3>
     <p><span class="pick">401 → single-flight refresh → 재시도 1회.</span> refresh 실패 (revoked / SSO 종료) 시 "세션 만료" 안내 + 로그인 화면 복귀.</p>
+    <p><span class="pick">refresh_token 회전 · 재사용 감지.</span> 갱신마다 새 refresh_token 을 keychain 에 저장. 옛 값을 다시 쓰면 계정 서버가 토큰 패밀리 전체를 폐기하므로, UI(401) · SSE 재연결 · VFS hydrate 스레드의 갱신을 Rust <code>oauth.rs</code> 한 곳(락 + 공용 access token 캐시)으로 직렬화. SSE 는 401 이면 새 토큰으로 즉시 재연결. 로그아웃 = <code>revocation_endpoint</code> 로 refresh_token 폐기 + keychain 삭제.</p>
   </div>
 
   <div class="card">
@@ -168,7 +171,7 @@
 
 <h2>사용자 흐름 (현재 동작)</h2>
 <div class="flow">1. .msi 설치 → 첫 실행
-2. 시스템 브라우저 → Keycloak SSO 로그인        <span class="hl">← 동작</span>
+2. 시스템 브라우저 → Ashfield 계정으로 로그인   <span class="hl">← 계정 서버 SSO</span>
 3. 로컬 폴더 확인 (default ~\Ashfield\)          <span class="hl">← opt-out, 자동 bootstrap</span>
 4. 첫 sync — placeholder 생성                    <span class="hl">← 동작</span>
 5. 탐색기에서 파일 보임 → 클릭 → 자동 hydrate    <span class="hl">← 동작 (vault 는 복호화 hydrate)</span>
@@ -196,8 +199,9 @@
 <table>
   <tr><th>항목</th><th>방식</th></tr>
   <tr><td>refresh_token 보관</td><td>Windows Credential Manager (OS 암호화, 사용자 격리) — JS 메모리/디스크 노출 X</td></tr>
-  <tr><td>access_token</td><td>메모리만 · TTL ~5분 · 만료 시 자동 refresh</td></tr>
-  <tr><td>PKCE</td><td>code 탈취 후 재사용 차단 — verifier 는 앱 메모리에만, Keycloak 은 SHA256 해시(challenge)만 봄</td></tr>
+  <tr><td>refresh_token 회전</td><td>갱신마다 새 값 저장 · 갱신은 프로세스 전체 직렬화 (재사용 시 패밀리 폐기 방지) · <code>invalid_grant</code> 면 keychain 삭제 후 재로그인</td></tr>
+  <tr><td>access_token</td><td>JWT (RS256, <code>aud</code> ∋ Drive public URL) · 메모리만 (Rust 공용 캐시 + JS) · TTL 15분 · 만료 시 자동 refresh</td></tr>
+  <tr><td>PKCE</td><td>code 탈취 후 재사용 차단 — verifier 는 앱 메모리에만, 계정 서버는 SHA256 해시(challenge)만 봄</td></tr>
   <tr><td>cache 폴더</td><td><code>%LOCALAPPDATA%\Ashfield\cache\</code> — OS user 권한 격리</td></tr>
   <tr><td>권한 회수</td><td>delta 의 <code>access_revoked</code> → placeholder + cache 즉시 삭제</td></tr>
 </table>
