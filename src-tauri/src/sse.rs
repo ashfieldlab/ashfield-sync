@@ -34,7 +34,7 @@ fn is_current(gen: u64) -> bool {
     ACTIVE.lock().unwrap().map(|g| g == gen).unwrap_or(false)
 }
 
-async fn run(app: AppHandle, url: String, initial_token: String, company: String, gen: u64) {
+async fn run(app: AppHandle, url: String, initial_token: String, workspace: String, gen: u64) {
     let mut backoff = 1u64;
     let mut token = initial_token;
     let mut first = true;
@@ -55,7 +55,7 @@ async fn run(app: AppHandle, url: String, initial_token: String, company: String
             }
         }
         first = false;
-        match connect_once(&app, &url, &token, &company, gen).await {
+        match connect_once(&app, &url, &token, &workspace, gen).await {
             Ok(()) => {
                 // 정상 종료(서버가 닫음): 즉시 재연결 시도
                 backoff = 1;
@@ -92,7 +92,7 @@ async fn connect_once(
     app: &AppHandle,
     url: &str,
     token: &str,
-    company: &str,
+    workspace: &str,
     gen: u64,
 ) -> Result<(), SseError> {
     use futures_util::StreamExt;
@@ -100,7 +100,7 @@ async fn connect_once(
     let res = reqwest::Client::new()
         .get(url)
         .bearer_auth(token)
-        .header("X-Active-Company-Id", urlencoding::encode(company).as_ref())
+        .header("X-Active-Workspace-Id", urlencoding::encode(workspace).as_ref())
         .header("Accept", "text/event-stream")
         .send()
         .await
@@ -132,10 +132,10 @@ async fn connect_once(
 }
 
 #[tauri::command]
-pub fn sse_connect(app: AppHandle, url: String, token: String, company: String) {
+pub fn sse_connect(app: AppHandle, url: String, token: String, workspace: String) {
     let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     *ACTIVE.lock().unwrap() = Some(gen);
-    tauri::async_runtime::spawn(run(app, url, token, company, gen));
+    tauri::async_runtime::spawn(run(app, url, token, workspace, gen));
 }
 
 #[tauri::command]

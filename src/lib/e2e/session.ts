@@ -18,7 +18,7 @@ interface KeyBundle {
 }
 
 let _privateKey: CryptoKey | null = null
-// (company|vaultNodeId) → vault_key
+// (workspace|vaultNodeId) → vault_key
 const _vaultKeys = new Map<string, CryptoKey>()
 
 export function isUnlocked(): boolean {
@@ -52,9 +52,9 @@ export async function unlock(password: string, useRecovery = false): Promise<voi
   }
 }
 
-/** vault_key 확보: 회사별로 wrapped 받아 개인키로 unwrap 후 캐시. */
-async function getVaultKey(company: string, vaultNodeId: string): Promise<CryptoKey | null> {
-  const cacheKey = `${company}|${vaultNodeId}`
+/** vault_key 확보: 워크스페이스별로 wrapped 받아 개인키로 unwrap 후 캐시. */
+async function getVaultKey(workspace: string, vaultNodeId: string): Promise<CryptoKey | null> {
+  const cacheKey = `${workspace}|${vaultNodeId}`
   const cached = _vaultKeys.get(cacheKey)
   if (cached) return cached
   if (!_privateKey) return null
@@ -62,7 +62,7 @@ async function getVaultKey(company: string, vaultNodeId: string): Promise<Crypto
   try {
     const r = await api<{ node_id: string; wrapped_vault_key: string }>(
       `/api/v1/e2e/vaults/${vaultNodeId}/key`,
-      { companyId: company },
+      { workspaceId: workspace },
     )
     wrapped = r.wrapped_vault_key
   } catch {
@@ -78,11 +78,11 @@ async function getVaultKey(company: string, vaultNodeId: string): Promise<Crypto
  * 복호화에 씀. wrapped_dek 를 vault_key 로 unwrap → raw 32B → base64. 실패 시 null.
  */
 export async function exportDek(
-  company: string,
+  workspace: string,
   vaultNodeId: string,
   wrappedDek: string,
 ): Promise<string | null> {
-  const vk = await getVaultKey(company, vaultNodeId)
+  const vk = await getVaultKey(workspace, vaultNodeId)
   if (!vk) return null
   try {
     const dek = await c.unwrapKeyAes(wrappedDek, vk)
@@ -98,10 +98,10 @@ export async function exportDek(
  * + vault_key 로 wrap(서버 저장용) 반환. 실패(비멤버/잠김) 시 null.
  */
 export async function makeUploadKey(
-  company: string,
+  workspace: string,
   vaultNodeId: string,
 ): Promise<{ rawB64: string; wrapped: string } | null> {
-  const vk = await getVaultKey(company, vaultNodeId)
+  const vk = await getVaultKey(workspace, vaultNodeId)
   if (!vk) return null
   const dek = await c.generateAesKey()
   const raw = await crypto.subtle.exportKey("raw", dek)
@@ -110,11 +110,11 @@ export async function makeUploadKey(
 
 /** vault 파일/폴더명 암호화 (V5c, 생성·이름변경용). 실패 시 null. */
 export async function encryptName(
-  company: string,
+  workspace: string,
   vaultNodeId: string,
   name: string,
 ): Promise<string | null> {
-  const vk = await getVaultKey(company, vaultNodeId)
+  const vk = await getVaultKey(workspace, vaultNodeId)
   if (!vk) return null
   try {
     return await c.aesEncryptText(vk, name)
@@ -125,11 +125,11 @@ export async function encryptName(
 
 /** vault 파일/폴더명 복호화. 실패 시 null. */
 export async function decryptName(
-  company: string,
+  workspace: string,
   vaultNodeId: string,
   encryptedName: string,
 ): Promise<string | null> {
-  const vk = await getVaultKey(company, vaultNodeId)
+  const vk = await getVaultKey(workspace, vaultNodeId)
   if (!vk) return null
   try {
     return await c.aesDecryptText(vk, encryptedName)

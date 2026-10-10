@@ -13,12 +13,31 @@ export interface paths {
         };
         /**
          * 현재 사용자 정보
-         * @description JWT claims + 우리 DB 의 회사 role.
+         * @description 신원 + 우리 DB 의 소속 워크스페이스·role.
          *
-         *     부수효과: `users` 캐시·회사 멤버십 lazy upsert (5분 throttle).
-         *     company_roles: 사용자가 admin 인 회사 목록 매핑 (ADR-0010, frontend isCompanyAdmin 계산용).
+         *     부수효과: `users` 행 upsert, 토큰 `workspaces` 가 바뀌었으면 워크스페이스·멤버십 동기화.
+         *     groups: 소속 워크스페이스 ID 목록. workspaces: 같은 목록의 {id, name, account_workspace_id}
+         *     (account_workspace_id = 계정 서버 워크스페이스 ID, 로컬 레거시 워크스페이스는 null).
+         *     workspace_roles: 워크스페이스별 role (ADR-0010, frontend isWorkspaceAdmin 계산용).
          */
         get: operations["get_me_api_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 내 저장 사용량·한도 (활성 워크스페이스 기준) */
+        get: operations["get_my_storage_api_v1_me_storage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -60,9 +79,9 @@ export interface paths {
         };
         /**
          * 자식 노드 목록
-         * @description 폴더 한 단계 자식만 반환. 깊은 트리는 재귀 호출.
+         * @description 폴더 한 단계 자식만 반환 (웹). recursive=true 면 전체 서브트리 (desktop sync).
          *
-         *     루트 + scope=personal 은 본인 소유 노드만. shared 는 회사 멤버 전부 동일 결과.
+         *     루트 + scope=personal 은 본인 소유 노드만. shared 는 워크스페이스 멤버 전부 동일 결과.
          *     공유받은 외부 노드는 `/shared-with-me` 에서.
          */
         get: operations["get_tree_api_v1_nodes_tree_get"];
@@ -83,7 +102,7 @@ export interface paths {
         };
         /**
          * 휴지통 목록
-         * @description 본인 personal soft-deleted + 회사 shared soft-deleted 를 한 번에.
+         * @description 본인 personal soft-deleted + 워크스페이스 shared soft-deleted 를 한 번에.
          *
          *     Phase 3 후속: N일 이상 묵으면 자동 청소. 지금은 영구.
          */
@@ -92,12 +111,12 @@ export interface paths {
         post?: never;
         /**
          * 휴지통 비우기: soft-deleted 노드 전체 영구 삭제
-         * @description 본인 personal soft-deleted + 회사 shared soft-deleted 노드를 hard delete + S3 object 제거.
+         * @description 본인 personal soft-deleted + 워크스페이스 shared soft-deleted 노드를 hard delete + S3 object 제거.
          *
          *     부모만 휴지통에 들어간 폴더의 자손 파일들도 RECURSIVE CTE 로 펼쳐 S3 object 까지 제거.
          *     DB row 는 FK ondelete=CASCADE 로 부모 hard-delete 시 자동 정리.
          *
-         *     공유 캘린더와 달리 회사 공유 폴더/파일도 누구든 비울 수 있다 (휴지통은 회사 단위 공통).
+         *     워크스페이스 폴더/파일도 누구든 비울 수 있다 (휴지통은 워크스페이스 단위 공통).
          */
         delete: operations["empty_trash_api_v1_nodes_trash_delete"];
         options?: never;
@@ -139,12 +158,36 @@ export interface paths {
          * @description Desktop sync 클라이언트 의 delta polling endpoint (ADR-0015).
          *
          *     `audit_logs` 의 entity_type='node' 변경을 since 이후로 가져옴.
-         *     권한 layer: scope=shared (회사 멤버 모두) / scope=personal owner / FileShare direct grantee.
+         *     권한 layer: scope=shared (워크스페이스 멤버 모두) / scope=personal owner / FileShare direct grantee.
          *     Ancestor share 상속은 Phase 4 (지금은 direct share 만).
          *
          *     limit 초과 시 has_more=true: 클라이언트가 마지막 occurred_at 으로 다시 호출.
          */
         get: operations["get_changes_api_v1_nodes_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Desktop sync: SSE nudge. 변경 발생 시 즉시 신호 (delta 는 /changes 로).
+         * @description 활성 워크스페이스의 node 변경을 Redis pub/sub 로 받아 SSE 로 push.
+         *
+         *     payload 없이 'change' 신호만: 클라이언트가 신호 받으면 `/changes?since=` 로
+         *     실제 delta 를 가져온다. polling 의 실시간 대체 (polling 은 fallback 으로 유지).
+         *     25초 heartbeat 로 idle 연결 유지. nginx 버퍼링은 X-Accel-Buffering 로 해제.
+         */
+        get: operations["node_events_api_v1_nodes_events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -188,7 +231,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * 휴지통 이동 (soft delete)
+         * 휴지통 이동 (soft delete) · 보안 폴더는 즉시 영구 삭제
          * @description soft delete: `deleted_at = now()`. S3 객체는 그대로 남고 휴지통에서 보임.
          *
          *     진행 중 multipart 업로드는 S3 abort 시도 후 계속.
@@ -352,7 +395,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * 내용 교체 완료: 새 key 승격 + 옛 객체 삭제
+         * 내용 교체 완료: 새 key 승격, 옛 내용은 버전으로 (ADR-0022)
          * @description 단일 PUT 은 body 없이, multipart 는 parts 리스트와 함께 호출.
          */
         post: operations["complete_overwrite_api_v1_nodes__node_id__overwrite_complete_post"];
@@ -471,25 +514,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/calendars": {
+    "/api/v1/nodes/{node_id}/versions": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 자동 가시 캘린더 목록 */
-        get: operations["list_calendars_api_v1_calendars_get"];
+        /** 버전 목록 (최신순) */
+        get: operations["list_versions_api_v1_nodes__node_id__versions_get"];
         put?: never;
-        /** 캘린더 생성 (native 또는 external_ics) */
-        post: operations["create_calendar_api_v1_calendars_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/calendars/{calendar_id}": {
+    "/api/v1/nodes/{node_id}/versions/{version_id}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 버전 다운로드 presigned URL */
+        post: operations["version_download_url_api_v1_nodes__node_id__versions__version_id__download_url_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/versions/{version_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 버전 복원: 현재 내용은 새 버전으로 남고 이 버전이 현재가 된다 */
+        post: operations["restore_version_api_v1_nodes__node_id__versions__version_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/versions/{version_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -499,225 +575,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 캘린더 soft delete (이벤트도 자연 가시 제외) */
-        delete: operations["delete_calendar_api_v1_calendars__calendar_id__delete"];
-        options?: never;
-        head?: never;
-        /** 캘린더 메타 수정 (이름·색·설명) */
-        patch: operations["patch_calendar_api_v1_calendars__calendar_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/calendars/{calendar_id}/ics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 캘린더 단위 .ics 일괄 다운로드 (모든 이벤트 포함)
-         * @description 단일 VCALENDAR 안에 캘린더의 모든 활성 이벤트 VEVENT 로 export.
-         *
-         *     RRULE/EXDATE 그대로 보존. 삭제(deleted_at) 이벤트는 제외.
-         */
-        get: operations["export_calendar_ics_api_v1_calendars__calendar_id__ics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
+        /** 버전 삭제 (관리 권한) */
+        delete: operations["delete_version_api_v1_nodes__node_id__versions__version_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/api/v1/calendars/{calendar_id}/preferences": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** 개인 가시/색 토글 */
-        patch: operations["patch_preferences_api_v1_calendars__calendar_id__preferences_patch"];
-        trace?: never;
-    };
-    "/api/v1/calendars/{calendar_id}/refresh": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 외부 ICS 재동기화 (wipe-and-reload)
-         * @description 외부 ICS 캘린더 재동기화: owner 또는 admin 만.
-         */
-        post: operations["refresh_calendar_api_v1_calendars__calendar_id__refresh_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/calendars/{calendar_id}/import-ics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * ICS 파일 1회성 import: 파일은 보관하지 않음
-         * @description 업로드된 .ics 파일의 master VEVENT 들을 캘린더에 적재. 파일 자체는 저장 안 함.
-         */
-        post: operations["import_ics_api_v1_calendars__calendar_id__import_ics_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/calendars/{calendar_id}/subscription": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** ICS subscription 상태 조회 */
-        get: operations["get_subscription_api_v1_calendars__calendar_id__subscription_get"];
-        put?: never;
-        /** ICS subscription 활성화 (토큰 발급) */
-        post: operations["enable_subscription_api_v1_calendars__calendar_id__subscription_post"];
-        /** ICS subscription 비활성화 (토큰 폐기) */
-        delete: operations["disable_subscription_api_v1_calendars__calendar_id__subscription_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/calendars/{calendar_id}/subscription/rotate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** ICS subscription 토큰 회전: 기존 URL 즉시 무효 */
-        post: operations["rotate_subscription_api_v1_calendars__calendar_id__subscription_rotate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * [from, to) 범위 occurrence 풀어서 반환
-         * @description 반환 = expand 된 occurrence 평탄 목록. 반복 이벤트는 occurrence 수만큼 row.
-         *
-         *     series 식별자는 `event_id`. occurrence 식별자는 `(event_id, start_at)`.
-         */
-        get: operations["list_events_api_v1_events_get"];
-        put?: never;
-        /** 일정 생성 */
-        post: operations["create_event_api_v1_events_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/events/{event_id}/ics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * .ics 단건 다운로드 (RFC 5545)
-         * @description 단건 .ics 다운로드: RFC 5545. master + RRULE + EXDATE 그대로 export.
-         */
-        get: operations["export_event_ics_api_v1_events__event_id__ics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/events/{event_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 이벤트 마스터 row 조회 */
-        get: operations["get_event_api_v1_events__event_id__get"];
-        put?: never;
-        post?: never;
-        /** 이벤트 삭제 (series 전체 또는 단일 occurrence) */
-        delete: operations["delete_event_api_v1_events__event_id__delete"];
-        options?: never;
-        head?: never;
-        /** 이벤트 series 전체 수정 */
-        patch: operations["patch_event_api_v1_events__event_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/events/{event_id}/invitations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 이벤트 초대자 목록 */
-        get: operations["list_invitations_api_v1_events__event_id__invitations_get"];
-        put?: never;
-        /** 초대 추가: 작성자/캘린더 owner 만 */
-        post: operations["create_invitation_api_v1_events__event_id__invitations_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/events/{event_id}/invitations/{invitation_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** 초대 제거: 작성자/owner 만 */
-        delete: operations["delete_invitation_api_v1_events__event_id__invitations__invitation_id__delete"];
-        options?: never;
-        head?: never;
-        /** 초대 응답 (수락/거절/임시) */
-        patch: operations["patch_invitation_api_v1_events__event_id__invitations__invitation_id__patch"];
         trace?: never;
     };
     "/api/v1/audit": {
@@ -727,8 +589,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 감사 로그 조회 (System Admin only) */
+        /** 감사 로그 조회 (워크스페이스 admin: 자기 워크스페이스 / system scope: System Admin) */
         get: operations["list_audit_api_v1_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 감사 로그 CSV 내보내기 (같은 접근·필터) */
+        get: operations["export_audit_csv_api_v1_audit_export_csv_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -768,7 +647,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** 이메일 알림 수신 토글 */
+        /** 이메일 알림 수신 토글 (마스터 + 카테고리별) */
         patch: operations["patch_preferences_api_v1_notifications_preferences_patch"];
         trace?: never;
     };
@@ -813,7 +692,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 회사 endpoint 목록 */
+        /** 워크스페이스 endpoint 목록 */
         get: operations["list_endpoints_api_v1_webhooks_get"];
         put?: never;
         /** endpoint 등록: secret 생성·1회 노출 */
@@ -866,7 +745,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 파일·일정 통합 검색 (ILIKE) */
+        /** 파일 검색 (권한 정합, ADR-0020) */
         get: operations["search_api_v1_search_get"];
         put?: never;
         post?: never;
@@ -893,7 +772,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/me/company/members": {
+    "/api/v1/me/workspace/members": {
         parameters: {
             query?: never;
             header?: never;
@@ -901,13 +780,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 회사 멤버 자동완성 검색
-         * @description active company 멤버 ILIKE 검색: email · name 매칭. 본인은 결과에서 제외.
+         * 워크스페이스 멤버 자동완성 검색
+         * @description active workspace 멤버 ILIKE 검색: email · name 매칭. 본인은 결과에서 제외.
          *
          *     q 가 비면 최근 활성 멤버 limit 만큼 반환 (단순 정렬: email asc).
          *     캐시는 한 번 로그인한 사용자만 보유하므로, 한 번도 안 들어온 멤버는 안 보임.
          */
-        get: operations["search_members_api_v1_me_company_members_get"];
+        get: operations["search_members_api_v1_me_workspace_members_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -916,15 +795,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/companies": {
+    "/api/v1/admin/workspaces": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 모든 회사 목록 (System Admin) */
-        get: operations["list_companies_api_v1_admin_companies_get"];
+        /** 모든 워크스페이스 목록 (System Admin) */
+        get: operations["list_workspaces_api_v1_admin_workspaces_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -933,15 +812,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/companies/{company_id}/members": {
+    "/api/v1/admin/workspaces/{workspace_id}/members": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 회사 멤버 + role 목록 (System Admin) */
-        get: operations["list_members_api_v1_admin_companies__company_id__members_get"];
+        /** 워크스페이스 멤버 + role 목록 (System Admin) */
+        get: operations["list_members_api_v1_admin_workspaces__workspace_id__members_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -950,7 +829,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/companies/{company_id}/members/{user_sub}": {
+    "/api/v1/admin/workspaces/{workspace_id}/members/{user_sub}": {
         parameters: {
             query?: never;
             header?: never;
@@ -964,7 +843,24 @@ export interface paths {
         options?: never;
         head?: never;
         /** 멤버 role 변경: admin 임명/강등 (System Admin) */
-        patch: operations["patch_member_role_api_v1_admin_companies__company_id__members__user_sub__patch"];
+        patch: operations["patch_member_role_api_v1_admin_workspaces__workspace_id__members__user_sub__patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Jobs */
+        get: operations["list_jobs_api_v1_admin_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/admin/smtp": {
@@ -1019,26 +915,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/smtp": {
+    "/api/v1/workspaces/{workspace_id}/smtp": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 회사 SMTP override 조회 (Company Admin) */
-        get: operations["get_company_smtp_api_v1_companies__company_id__smtp_get"];
-        /** 회사 SMTP override 저장 (Company Admin) */
-        put: operations["put_company_smtp_api_v1_companies__company_id__smtp_put"];
+        /** 워크스페이스 SMTP override 조회 (Workspace Admin) */
+        get: operations["get_workspace_smtp_api_v1_workspaces__workspace_id__smtp_get"];
+        /** 워크스페이스 SMTP override 저장 (Workspace Admin) */
+        put: operations["put_workspace_smtp_api_v1_workspaces__workspace_id__smtp_put"];
         post?: never;
-        /** 회사 SMTP override 삭제: 전역 SMTP 사용으로 복귀 (Company Admin) */
-        delete: operations["delete_company_smtp_api_v1_companies__company_id__smtp_delete"];
+        /** 워크스페이스 SMTP override 삭제: 전역 SMTP 사용으로 복귀 (Workspace Admin) */
+        delete: operations["delete_workspace_smtp_api_v1_workspaces__workspace_id__smtp_delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/smtp/connection-test": {
+    "/api/v1/workspaces/{workspace_id}/smtp/connection-test": {
         parameters: {
             query?: never;
             header?: never;
@@ -1047,15 +943,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 발송 없이 SMTP 연결+인증만 확인 (Company Admin) */
-        post: operations["test_company_smtp_connection_api_v1_companies__company_id__smtp_connection_test_post"];
+        /** 발송 없이 SMTP 연결+인증만 확인 (Workspace Admin) */
+        post: operations["test_workspace_smtp_connection_api_v1_workspaces__workspace_id__smtp_connection_test_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/smtp/test": {
+    "/api/v1/workspaces/{workspace_id}/smtp/test": {
         parameters: {
             query?: never;
             header?: never;
@@ -1064,41 +960,23 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 회사 SMTP 테스트 메일 발송 (Company Admin) */
-        post: operations["test_company_smtp_api_v1_companies__company_id__smtp_test_post"];
+        /** 워크스페이스 SMTP 테스트 메일 발송 (Workspace Admin) */
+        post: operations["test_workspace_smtp_api_v1_workspaces__workspace_id__smtp_test_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/profile": {
+    "/api/v1/workspaces/{workspace_id}/members": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 회사 표시 정보 조회 (Company Admin) */
-        get: operations["get_profile_api_v1_companies__company_id__profile_get"];
-        /** 회사 표시 정보 수정 (Company Admin) */
-        put: operations["put_profile_api_v1_companies__company_id__profile_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/companies/{company_id}/members": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 회사 멤버 + role 목록 (Company Admin) */
-        get: operations["list_members_api_v1_companies__company_id__members_get"];
+        /** 워크스페이스 멤버 + role 목록 (Workspace Admin) */
+        get: operations["list_members_api_v1_workspaces__workspace_id__members_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1107,7 +985,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/members/{user_sub}": {
+    "/api/v1/workspaces/{workspace_id}/members/{user_sub}/quota": {
         parameters: {
             query?: never;
             header?: never;
@@ -1115,24 +993,24 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** 멤버 저장 한도 설정 (Workspace Admin) */
+        put: operations["put_member_quota_api_v1_workspaces__workspace_id__members__user_sub__quota_put"];
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** 멤버 role 변경 (Company Admin) */
-        patch: operations["patch_member_role_api_v1_companies__company_id__members__user_sub__patch"];
+        patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/quota": {
+    "/api/v1/workspaces/{workspace_id}/quota": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 회사 quota 조회 (Company Admin) */
-        get: operations["get_company_quota_api_v1_companies__company_id__quota_get"];
+        /** 워크스페이스 quota 조회 (Workspace Admin) */
+        get: operations["get_workspace_quota_api_v1_workspaces__workspace_id__quota_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1141,17 +1019,17 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/companies/{company_id}/quota": {
+    "/api/v1/admin/workspaces/{workspace_id}/quota": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 회사 quota 조회 (System Admin) */
-        get: operations["admin_get_quota_api_v1_admin_companies__company_id__quota_get"];
-        /** 회사 quota 설정 (System Admin) */
-        put: operations["admin_put_quota_api_v1_admin_companies__company_id__quota_put"];
+        /** 워크스페이스 quota 조회 (System Admin) */
+        get: operations["admin_get_quota_api_v1_admin_workspaces__workspace_id__quota_get"];
+        /** 워크스페이스 quota 설정 (System Admin) */
+        put: operations["admin_put_quota_api_v1_admin_workspaces__workspace_id__quota_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1159,7 +1037,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/booking-types": {
+    "/api/v1/e2e/keys/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 내 E2E 키 번들: 잠금해제용 (salt + 암호화된 개인키) */
+        get: operations["get_my_keys_api_v1_e2e_keys_me_get"];
+        /**
+         * 내 E2E 키 번들 등록/교체 (첫 설정 또는 비밀번호 변경)
+         * @description 클라이언트가 키쌍 생성 + 개인키를 KEK/복구코드로 암호화해 보냄.
+         *
+         *     ⚠️ public_key 교체는 기존 wrapped vault_key 들을 무효화한다 (다른 공개키로
+         *     감싸졌으므로). 첫 설정 / 같은 키쌍 재암호화(비밀번호 변경) 에만 사용.
+         *     키쌍 자체 rotation 은 vault 재초대가 필요 (V2+ 에서 다룸).
+         */
+        put: operations["put_my_keys_api_v1_e2e_keys_me_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/e2e/keys/{user_sub}/public": {
         parameters: {
             query?: never;
             header?: never;
@@ -1167,47 +1070,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * 본인이 관리 가능한 BookingType 목록
-         * @description 본인 소유 + 본인이 admin 인 활성 회사의 회사 소유. System Admin 은 활성 회사 + 본인 것.
+         * 타인 공개키: vault 공유 시 vault_key wrap 용
+         * @description 공개키는 평문: 누구나 조회 가능 (잠그기 전용이라 노출 무해).
          */
-        get: operations["list_booking_types_api_v1_booking_types_get"];
-        put?: never;
-        /** BookingType 생성 */
-        post: operations["create_booking_type_api_v1_booking_types_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/booking-types/{booking_type_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** BookingType 단건 조회 */
-        get: operations["get_booking_type_api_v1_booking_types__booking_type_id__get"];
-        put?: never;
-        post?: never;
-        /** BookingType soft delete (공개 URL 무효화) */
-        delete: operations["delete_booking_type_api_v1_booking_types__booking_type_id__delete"];
-        options?: never;
-        head?: never;
-        /** BookingType 수정 */
-        patch: operations["patch_booking_type_api_v1_booking_types__booking_type_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/booking-types/{booking_type_id}/bookings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 이 BookingType 으로 들어온 Booking 목록 (운영자) */
-        get: operations["list_bookings_of_type_api_v1_booking_types__booking_type_id__bookings_get"];
+        get: operations["get_public_key_api_v1_e2e_keys__user_sub__public_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1216,66 +1082,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/booking-types/{booking_type_id}/bookings/{booking_id}/reschedule": {
+    "/api/v1/e2e/vaults": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** 활성 워크스페이스의 vault 목록: 클라이언트가 암호화 폴더 식별 */
+        get: operations["list_vaults_api_v1_e2e_vaults_get"];
         put?: never;
-        /** 운영자가 예약 시간(또는 메모) 변경 */
-        post: operations["operator_reschedule_booking_api_v1_booking_types__booking_type_id__bookings__booking_id__reschedule_post"];
+        /**
+         * 보안 폴더 생성: 빈 folder 를 vault 로 (생성자 자동 멤버)
+         * @description vault_key 는 클라이언트가 생성 + 본인 공개키로 wrap 해서 보냄.
+         *
+         *     빈 폴더만 가능: 기존 파일은 평문이라 재암호화 문제 회피 (ADR-0016).
+         */
+        post: operations["create_vault_api_v1_e2e_vaults_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/booking-types/{booking_type_id}/bookings/{booking_id}/cancel": {
+    "/api/v1/e2e/vaults/{node_id}/key": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        /** 운영자가 예약 취소 */
-        post: operations["operator_cancel_booking_api_v1_booking_types__booking_type_id__bookings__booking_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/booking-types/{booking_type_id}/rotate-key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 공개 URL 키 재발급 (기존 URL 무효화) */
-        post: operations["rotate_public_key_api_v1_booking_types__booking_type_id__rotate_key_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/companies/{company_id}/email-templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 회사 이메일 템플릿 목록 (Company Admin) */
-        get: operations["list_templates_api_v1_companies__company_id__email_templates_get"];
+        /** 내 wrapped vault_key: 개인키로 풀어 vault_key 복원 */
+        get: operations["get_vault_key_api_v1_e2e_vaults__node_id__key_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1284,61 +1122,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/companies/{company_id}/email-templates/{event_type}": {
+    "/api/v1/e2e/vaults/{node_id}/members": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** 이메일 템플릿 단건: 현재 active (override 또는 기본) */
-        get: operations["get_template_api_v1_companies__company_id__email_templates__event_type__get"];
-        /** 이메일 템플릿 override 저장 */
-        put: operations["put_template_api_v1_companies__company_id__email_templates__event_type__put"];
-        post?: never;
-        /** 회사 override 삭제: 시스템 기본 사용으로 복귀 */
-        delete: operations["delete_template_api_v1_companies__company_id__email_templates__event_type__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/companies/{company_id}/email-templates/{event_type}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
+        /** vault 멤버 목록 (멤버만 조회) */
+        get: operations["list_vault_members_api_v1_e2e_vaults__node_id__members_get"];
         put?: never;
-        /** 템플릿 미리보기: 샘플 변수로 렌더링 */
-        post: operations["preview_template_api_v1_companies__company_id__email_templates__event_type__preview_post"];
+        /**
+         * 멤버 추가 (공유): 멤버만 가능. wrapped_vault_key 는 대상 공개키로 wrap
+         * @description 기존 멤버만 추가 가능: vault_key 를 가진 사람이 대상 공개키로 re-wrap.
+         *
+         *     서버는 wrap 된 것만 받음 (vault_key 평문은 클라이언트에만).
+         */
+        post: operations["add_vault_member_api_v1_e2e_vaults__node_id__members_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/me/caldav-tokens": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** CalDAV 토큰 목록 (활성 회사 범위) */
-        get: operations["list_tokens_api_v1_me_caldav_tokens_get"];
-        put?: never;
-        /** CalDAV 토큰 발급: secret 평문은 응답에만 */
-        post: operations["create_token_api_v1_me_caldav_tokens_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/me/caldav-tokens/{token_id}": {
+    "/api/v1/e2e/vaults/{node_id}/members/{member_sub}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1348,22 +1155,28 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** CalDAV 토큰 폐기: 즉시 무효 */
-        delete: operations["revoke_token_api_v1_me_caldav_tokens__token_id__delete"];
+        /**
+         * 멤버 제거 (접근 철회): 멤버만 가능
+         * @description 철회는 신규 접근만 차단: 이미 받아간 평문/키는 회수 불가 (ADR-0016 결정 4).
+         */
+        delete: operations["remove_vault_member_api_v1_e2e_vaults__node_id__members__member_sub__delete"];
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/onlyoffice/config/{node_id}": {
+    "/api/v1/groups": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** OnlyOffice 에디터 임베드용 config + 서명 token 발급 */
-        get: operations["get_config_api_v1_onlyoffice_config__node_id__get"];
+        /**
+         * 그룹(부서) 목록: 현재 항상 빈 목록
+         * @description 활성 워크스페이스의 부서 목록 (그룹 후보). 부서 소스가 없어 지금은 빈 목록.
+         */
+        get: operations["list_groups_api_v1_groups_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1372,15 +1185,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/onlyoffice/files/{token}": {
+    "/api/v1/groups/my-access-set": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** OnlyOffice 가 호출: 토큰으로 식별된 파일의 binary 반환 */
-        get: operations["serve_file_api_v1_onlyoffice_files__token__get"];
+        /**
+         * 내 접근집합(부서+조상 id): 그룹 공유 권한 검증용 (디버그)
+         * @description 그룹 공유 권한 해석에 쓰이는 '접근집합'을 그대로 노출: 부서+조상 walk 확인용.
+         */
+        get: operations["my_access_set_api_v1_groups_my_access_set_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1389,7 +1205,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/onlyoffice/callback/{token}": {
+    "/api/v1/team-folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 내 팀 폴더 목록 */
+        get: operations["list_my_team_folders_api_v1_team_folders_get"];
+        put?: never;
+        /** 팀 폴더 생성 (워크스페이스 admin) */
+        post: operations["create_team_folder_api_v1_team_folders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/team-folders/{node_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1398,94 +1232,9 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** OnlyOffice 의 저장 알림: status 2/6 시 본문 fetch 후 우리 S3 갱신 */
-        post: operations["callback_api_v1_onlyoffice_callback__token__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/public/v1/booking/{public_key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 공개 BookingType 정보 (회사 이름 + 양식) */
-        get: operations["get_public_booking_type_api_public_v1_booking__public_key__get"];
-        put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/public/v1/booking/{public_key}/slots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 가용 슬롯 조회 */
-        get: operations["get_slots_api_public_v1_booking__public_key__slots_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/public/v1/booking/{public_key}/submit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 예약 제출 (즉시 등록: ADR-0012) */
-        post: operations["submit_booking_api_public_v1_booking__public_key__submit_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/public/v1/booking/cancel/{cancel_token}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 예약 취소 (토큰 인증) */
-        post: operations["cancel_api_public_v1_booking_cancel__cancel_token__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/public/v1/calendars/{token}.ics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** ICS subscription (비인증, 토큰 기반) */
-        get: operations["public_calendar_ics_api_public_v1_calendars__token__ics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
+        /** 팀 폴더 삭제 (워크스페이스 admin) */
+        delete: operations["delete_team_folder_api_v1_team_folders__node_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1603,8 +1352,8 @@ export interface components {
         AuditLogResponse: {
             /** Id */
             id: string;
-            /** Company Id */
-            company_id: string | null;
+            /** Workspace Id */
+            workspace_id: string | null;
             /** Actor Sub */
             actor_sub: string | null;
             /** Actor Name */
@@ -1629,270 +1378,6 @@ export interface components {
              */
             created_at: string;
         };
-        /** Body_import_ics_api_v1_calendars__calendar_id__import_ics_post */
-        Body_import_ics_api_v1_calendars__calendar_id__import_ics_post: {
-            /**
-             * File
-             * @description ICS 파일
-             */
-            file: string;
-        };
-        /** BookingTypeCreate */
-        BookingTypeCreate: {
-            /**
-             * Owner Type
-             * @enum {string}
-             */
-            owner_type: "user" | "company";
-            /** Title */
-            title: string;
-            /** Description */
-            description?: string | null;
-            /** Privacy Policy Url */
-            privacy_policy_url?: string | null;
-            /** Duration Minutes */
-            duration_minutes: number;
-            /**
-             * Timezone
-             * @default Asia/Seoul
-             */
-            timezone: string;
-            /** Weekly Schedule */
-            weekly_schedule?: {
-                [key: string]: unknown;
-            };
-            /** Available From */
-            available_from?: string | null;
-            /** Available To */
-            available_to?: string | null;
-            /**
-             * Minimum Notice Minutes
-             * @default 1440
-             */
-            minimum_notice_minutes: number;
-            /**
-             * Lookahead Days
-             * @default 30
-             */
-            lookahead_days: number;
-            /** Target Calendar Id */
-            target_calendar_id: string;
-            /** Blocking Calendar Ids */
-            blocking_calendar_ids?: string[];
-            /**
-             * Capacity
-             * @default 1
-             */
-            capacity: number;
-            /** Notify User Subs */
-            notify_user_subs?: string[];
-        };
-        /** BookingTypeListResponse */
-        BookingTypeListResponse: {
-            /** Items */
-            items: components["schemas"]["BookingTypeResponse"][];
-        };
-        /** BookingTypePatch */
-        BookingTypePatch: {
-            /** Title */
-            title?: string | null;
-            /** Description */
-            description?: string | null;
-            /** Privacy Policy Url */
-            privacy_policy_url?: string | null;
-            /** Duration Minutes */
-            duration_minutes?: number | null;
-            /** Timezone */
-            timezone?: string | null;
-            /** Weekly Schedule */
-            weekly_schedule?: {
-                [key: string]: unknown;
-            } | null;
-            /** Available From */
-            available_from?: string | null;
-            /** Available To */
-            available_to?: string | null;
-            /** Minimum Notice Minutes */
-            minimum_notice_minutes?: number | null;
-            /** Lookahead Days */
-            lookahead_days?: number | null;
-            /** Target Calendar Id */
-            target_calendar_id?: string | null;
-            /** Blocking Calendar Ids */
-            blocking_calendar_ids?: string[] | null;
-            /** Capacity */
-            capacity?: number | null;
-            /** Notify User Subs */
-            notify_user_subs?: string[] | null;
-            /** Enabled */
-            enabled?: boolean | null;
-        };
-        /** BookingTypeResponse */
-        BookingTypeResponse: {
-            /** Id */
-            id: string;
-            /**
-             * Owner Type
-             * @enum {string}
-             */
-            owner_type: "user" | "company";
-            /** Owner User Sub */
-            owner_user_sub: string | null;
-            /** Owner Company Id */
-            owner_company_id: string | null;
-            /** Public Key */
-            public_key: string;
-            /** Title */
-            title: string;
-            /** Description */
-            description: string | null;
-            /** Privacy Policy Url */
-            privacy_policy_url: string | null;
-            /** Duration Minutes */
-            duration_minutes: number;
-            /** Timezone */
-            timezone: string;
-            /** Weekly Schedule */
-            weekly_schedule: {
-                [key: string]: unknown;
-            };
-            /** Available From */
-            available_from: string | null;
-            /** Available To */
-            available_to: string | null;
-            /** Minimum Notice Minutes */
-            minimum_notice_minutes: number;
-            /** Lookahead Days */
-            lookahead_days: number;
-            /** Target Calendar Id */
-            target_calendar_id: string;
-            /** Blocking Calendar Ids */
-            blocking_calendar_ids: string[];
-            /** Capacity */
-            capacity: number;
-            /** Notify User Subs */
-            notify_user_subs: string[];
-            /** Enabled */
-            enabled: boolean;
-        };
-        /** CalDavTokenCreate */
-        CalDavTokenCreate: {
-            /** Name */
-            name: string;
-        };
-        /** CalDavTokenCreated */
-        CalDavTokenCreated: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Company Id */
-            company_id: string;
-            /** Username */
-            username: string;
-            /** Secret */
-            secret: string;
-            /** Server Url */
-            server_url: string;
-        };
-        /** CalDavTokenItem */
-        CalDavTokenItem: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Company Id */
-            company_id: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Last Used At */
-            last_used_at: string | null;
-        };
-        /** CalDavTokenList */
-        CalDavTokenList: {
-            /** Items */
-            items: components["schemas"]["CalDavTokenItem"][];
-        };
-        /** CalendarCreate */
-        CalendarCreate: {
-            /** Name */
-            name: string;
-            /**
-             * Scope
-             * @default personal
-             * @enum {string}
-             */
-            scope: "personal" | "shared";
-            /**
-             * Color
-             * @default #4f46e5
-             */
-            color: string;
-            /** Description */
-            description?: string | null;
-            /** External Ics Url */
-            external_ics_url?: string | null;
-        };
-        /** CalendarListResponse */
-        CalendarListResponse: {
-            /** Calendars */
-            calendars: components["schemas"]["CalendarResponse"][];
-        };
-        /** CalendarPatch */
-        CalendarPatch: {
-            /** Name */
-            name?: string | null;
-            /** Color */
-            color?: string | null;
-            /** Description */
-            description?: string | null;
-        };
-        /** CalendarPreferencePatch */
-        CalendarPreferencePatch: {
-            /** Hidden */
-            hidden?: boolean | null;
-            /** Color Override */
-            color_override?: string | null;
-        };
-        /** CalendarResponse */
-        CalendarResponse: {
-            /** Id */
-            id: string;
-            /** Company Id */
-            company_id: string;
-            /** Owner Id */
-            owner_id: string;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "personal" | "shared";
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "native" | "external_ics";
-            /** Name */
-            name: string;
-            /** Description */
-            description: string | null;
-            /** Color */
-            color: string;
-            /** External Ics Url */
-            external_ics_url?: string | null;
-            /** External Ics Refresh At */
-            external_ics_refresh_at?: string | null;
-            /**
-             * Hidden
-             * @default false
-             */
-            hidden: boolean;
-            /** Color Override */
-            color_override?: string | null;
-        };
         /** ChangesResponse */
         ChangesResponse: {
             /** Changes */
@@ -1904,100 +1389,6 @@ export interface components {
             server_time: string;
             /** Has More */
             has_more: boolean;
-        };
-        /** CompanyListItem */
-        CompanyListItem: {
-            /** Id */
-            id: string;
-            /** Name */
-            name: string;
-            /** Member Count */
-            member_count: number;
-            /** Admin Count */
-            admin_count: number;
-        };
-        /** CompanyListResponse */
-        CompanyListResponse: {
-            /** Companies */
-            companies: components["schemas"]["CompanyListItem"][];
-        };
-        /** CompanyMember */
-        CompanyMember: {
-            /** Sub */
-            sub: string;
-            /** Email */
-            email: string;
-            /** Name */
-            name: string | null;
-        };
-        /** CompanyMembersResponse */
-        CompanyMembersResponse: {
-            /** Members */
-            members: components["schemas"]["CompanyMember"][];
-        };
-        /** CompanyProfilePatch */
-        CompanyProfilePatch: {
-            /** Logo Url */
-            logo_url?: string | null;
-        };
-        /** CompanyProfileResponse */
-        CompanyProfileResponse: {
-            /** Company Id */
-            company_id: string;
-            /** Name */
-            name: string;
-            /** Logo Url */
-            logo_url: string | null;
-        };
-        /** CompanySmtpPatch */
-        CompanySmtpPatch: {
-            /** Host */
-            host: string;
-            /** Port */
-            port: number;
-            /**
-             * Smtp User
-             * @default
-             */
-            smtp_user: string;
-            /**
-             * Smtp Password
-             * @default
-             */
-            smtp_password: string;
-            /**
-             * Tls Mode
-             * @default none
-             */
-            tls_mode: string;
-            /** From Addr */
-            from_addr: string;
-            /**
-             * From Name
-             * @default
-             */
-            from_name: string;
-        };
-        /** CompanySmtpResponse */
-        CompanySmtpResponse: {
-            /** Override Enabled */
-            override_enabled: boolean;
-            /** Host */
-            host: string;
-            /** Port */
-            port: number;
-            /** Smtp User */
-            smtp_user: string;
-            /** Smtp Password */
-            smtp_password: string;
-            /** Tls Mode */
-            tls_mode: string;
-            /** From Addr */
-            from_addr: string;
-            /** From Name */
-            from_name: string;
-            /** Effective Source */
-            effective_source: string;
         };
         /** CompleteMultipartRequest */
         CompleteMultipartRequest: {
@@ -2013,276 +1404,50 @@ export interface components {
             /** Expires In */
             expires_in: number;
         };
+        /**
+         * E2EKeyBundle
+         * @description 내 키 번들: 등록(PUT) / 조회(GET) 공용.
+         */
+        E2EKeyBundle: {
+            /** Salt */
+            salt: string;
+            /** Public Key */
+            public_key: string;
+            /** Enc Private Key */
+            enc_private_key: string;
+            /** Enc Private Key Recovery */
+            enc_private_key_recovery: string;
+        };
+        /**
+         * E2EPublicKey
+         * @description 타인 공개키: 공유 시 vault_key wrap 용.
+         */
+        E2EPublicKey: {
+            /** User Sub */
+            user_sub: string;
+            /** Public Key */
+            public_key: string;
+        };
         /** EmailPreferencePatch */
         EmailPreferencePatch: {
             /** Email Enabled */
-            email_enabled: boolean;
+            email_enabled?: boolean | null;
+            /** Email Categories */
+            email_categories?: {
+                [key: string]: boolean;
+            } | null;
         };
         /** EmailPreferenceResponse */
         EmailPreferenceResponse: {
             /** Email Enabled */
             email_enabled: boolean;
-        };
-        /** EmailTemplateDetail */
-        EmailTemplateDetail: {
-            /** Event Type */
-            event_type: string;
-            /** Label */
-            label: string;
-            /** Overridden */
-            overridden: boolean;
-            /** Variables */
-            variables: string[];
-            /** Subject */
-            subject: string;
-            /** Body */
-            body: string;
             /**
-             * Is Html
-             * @default false
+             * Email Categories
+             * @default {}
              */
-            is_html: boolean;
-            /** Text Fallback */
-            text_fallback?: string | null;
-            /** Default Subject */
-            default_subject: string;
-            /** Default Body */
-            default_body: string;
-            /**
-             * Default Is Html
-             * @default false
-             */
-            default_is_html: boolean;
-        };
-        /**
-         * EmailTemplateItem
-         * @description 리스트 응답의 한 행: 어떤 event_type 이 커스텀돼 있는지.
-         */
-        EmailTemplateItem: {
-            /** Event Type */
-            event_type: string;
-            /** Label */
-            label: string;
-            /** Overridden */
-            overridden: boolean;
-            /** Variables */
-            variables: string[];
-        };
-        /** EmailTemplateListResponse */
-        EmailTemplateListResponse: {
-            /** Items */
-            items: components["schemas"]["EmailTemplateItem"][];
-        };
-        /** EmailTemplatePreviewRequest */
-        EmailTemplatePreviewRequest: {
-            /** Subject */
-            subject: string;
-            /** Body */
-            body: string;
-            /**
-             * Is Html
-             * @default false
-             */
-            is_html: boolean;
-            /** Text Fallback */
-            text_fallback?: string | null;
-        };
-        /** EmailTemplatePreviewResponse */
-        EmailTemplatePreviewResponse: {
-            /** Subject */
-            subject: string;
-            /** Body */
-            body: string;
-            /** Is Html */
-            is_html: boolean;
-            /** Text Fallback */
-            text_fallback?: string | null;
-        };
-        /** EmailTemplatePut */
-        EmailTemplatePut: {
-            /** Subject */
-            subject: string;
-            /** Body */
-            body: string;
-            /**
-             * Is Html
-             * @default false
-             */
-            is_html: boolean;
-            /** Text Fallback */
-            text_fallback?: string | null;
-        };
-        /** EventCreate */
-        EventCreate: {
-            /** Calendar Id */
-            calendar_id: string;
-            /** Title */
-            title: string;
-            /** Description */
-            description?: string | null;
-            /** Location */
-            location?: string | null;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-            /**
-             * All Day
-             * @default false
-             */
-            all_day: boolean;
-            /**
-             * Timezone
-             * @default UTC
-             */
-            timezone: string;
-            /** Rrule */
-            rrule?: string | null;
-            /** Reminder Minutes Before */
-            reminder_minutes_before?: number | null;
-        };
-        /** EventInvitationCreate */
-        EventInvitationCreate: {
-            /** Invitee Sub */
-            invitee_sub: string;
-        };
-        /** EventInvitationList */
-        EventInvitationList: {
-            /** Invitations */
-            invitations: components["schemas"]["EventInvitationResponse"][];
-        };
-        /** EventInvitationPatch */
-        EventInvitationPatch: {
-            /**
-             * Response
-             * @enum {string}
-             */
-            response: "pending" | "accepted" | "declined" | "tentative";
-        };
-        /** EventInvitationResponse */
-        EventInvitationResponse: {
-            /** Id */
-            id: string;
-            /** Event Id */
-            event_id: string;
-            /** Invitee Sub */
-            invitee_sub: string;
-            /** Invitee Email */
-            invitee_email?: string | null;
-            /** Invitee Name */
-            invitee_name?: string | null;
-            /**
-             * Response
-             * @enum {string}
-             */
-            response: "pending" | "accepted" | "declined" | "tentative";
-            /** Responded At */
-            responded_at: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-        };
-        /**
-         * EventOccurrence
-         * @description Expanded occurrence: 마스터 event 의 한 발생.
-         *
-         *     series 식별자는 event_id (불변), occurrence 식별자는 start_at (ISO).
-         */
-        EventOccurrence: {
-            /** Event Id */
-            event_id: string;
-            /** Calendar Id */
-            calendar_id: string;
-            /** Title */
-            title: string;
-            /** Description */
-            description: string | null;
-            /** Location */
-            location: string | null;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-            /** All Day */
-            all_day: boolean;
-            /** Timezone */
-            timezone: string;
-            /** Is Recurring */
-            is_recurring: boolean;
-            /** Booking Id */
-            booking_id?: string | null;
-        };
-        /** EventPatch */
-        EventPatch: {
-            /** Title */
-            title?: string | null;
-            /** Description */
-            description?: string | null;
-            /** Location */
-            location?: string | null;
-            /** Start At */
-            start_at?: string | null;
-            /** End At */
-            end_at?: string | null;
-            /** All Day */
-            all_day?: boolean | null;
-            /** Timezone */
-            timezone?: string | null;
-            /** Rrule */
-            rrule?: string | null;
-            /** Reminder Minutes Before */
-            reminder_minutes_before?: number | null;
-        };
-        /** EventResponse */
-        EventResponse: {
-            /** Id */
-            id: string;
-            /** Calendar Id */
-            calendar_id: string;
-            /** Title */
-            title: string;
-            /** Description */
-            description: string | null;
-            /** Location */
-            location: string | null;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-            /** All Day */
-            all_day: boolean;
-            /** Timezone */
-            timezone: string;
-            /** Rrule */
-            rrule: string | null;
-            /** Recurrence Exceptions */
-            recurrence_exceptions: string[];
-            /** Reminder Minutes Before */
-            reminder_minutes_before: number | null;
-            /** Created By Sub */
-            created_by_sub: string;
-            /** Booking Id */
-            booking_id?: string | null;
+            email_categories: {
+                [key: string]: boolean;
+            };
         };
         /** ExternalLinkCreate */
         ExternalLinkCreate: {
@@ -2334,7 +1499,9 @@ export interface components {
         /** FileShareCreate */
         FileShareCreate: {
             /** Grantee Sub */
-            grantee_sub: string;
+            grantee_sub?: string | null;
+            /** Grantee Group Id */
+            grantee_group_id?: string | null;
             /**
              * Permission
              * @default read
@@ -2356,11 +1523,15 @@ export interface components {
             /** Node Id */
             node_id: string;
             /** Grantee Sub */
-            grantee_sub: string;
+            grantee_sub?: string | null;
             /** Grantee Email */
             grantee_email?: string | null;
             /** Grantee Name */
             grantee_name?: string | null;
+            /** Grantee Group Id */
+            grantee_group_id?: string | null;
+            /** Group Name */
+            group_name?: string | null;
             /**
              * Permission
              * @enum {string}
@@ -2375,6 +1546,36 @@ export interface components {
             granted_at: string;
             /** Expires At */
             expires_at: string | null;
+        };
+        /** FileVersionDownloadUrl */
+        FileVersionDownloadUrl: {
+            /** Url */
+            url: string;
+            /** Expires In */
+            expires_in: number;
+            /** Wrapped Dek */
+            wrapped_dek?: string | null;
+        };
+        /** FileVersionResponse */
+        FileVersionResponse: {
+            /** Id */
+            id: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Saved By */
+            saved_by: string;
+            /** Saved By Name */
+            saved_by_name?: string | null;
+            /**
+             * Saved At
+             * Format: date-time
+             */
+            saved_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** FolderCreate */
         FolderCreate: {
@@ -2394,34 +1595,71 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** IcsImportResponse */
-        IcsImportResponse: {
-            /** Imported */
-            imported: number;
+        /** JobRunOut */
+        JobRunOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Item Count */
+            item_count: number | null;
+            /** Error */
+            error: string | null;
+        };
+        /** JobSummary */
+        JobSummary: {
+            /** Name */
+            name: string;
+            /** Schedule */
+            schedule: string;
+            last: components["schemas"]["JobRunOut"] | null;
+            /** Recent */
+            recent: components["schemas"]["JobRunOut"][];
+        };
+        /** JobsResponse */
+        JobsResponse: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
         };
         /** MarkAllReadResponse */
         MarkAllReadResponse: {
             /** Marked */
             marked: number;
         };
-        /** MemberItem */
-        MemberItem: {
-            /** User Sub */
-            user_sub: string;
-            /** Email */
-            email: string | null;
-            /** Name */
-            name: string | null;
+        /** MemberQuotaPatch */
+        MemberQuotaPatch: {
             /**
-             * Role
-             * @enum {string}
+             * Storage Bytes Limit
+             * @description None = 무제한. 0 = 새 업로드 전부 차단.
              */
-            role: "admin" | "member";
+            storage_bytes_limit?: number | null;
         };
-        /** MemberListResponse */
-        MemberListResponse: {
-            /** Members */
-            members: components["schemas"]["MemberItem"][];
+        /** MyStorageResponse */
+        MyStorageResponse: {
+            /** Storage Bytes Used */
+            storage_bytes_used: number;
+            /**
+             * Version Bytes Used
+             * @default 0
+             */
+            version_bytes_used: number;
+            /** Storage Bytes Limit */
+            storage_bytes_limit: number | null;
+            /** Storage Pct */
+            storage_pct: number | null;
+            /** Workspace Bytes Limit */
+            workspace_bytes_limit: number | null;
         };
         /**
          * NodeChange
@@ -2461,8 +1699,8 @@ export interface components {
             name: string;
             /** Parent Id */
             parent_id: string | null;
-            /** Company Id */
-            company_id: string;
+            /** Workspace Id */
+            workspace_id: string;
             /** Owner Id */
             owner_id: string;
             /**
@@ -2481,6 +1719,8 @@ export interface components {
              * @enum {string}
              */
             status: "pending" | "ready";
+            /** Wrapped Dek */
+            wrapped_dek?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -2500,6 +1740,11 @@ export interface components {
             notifications: components["schemas"]["NotificationResponse"][];
             /** Unread Count */
             unread_count: number;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
         };
         /** NotificationPatch */
         NotificationPatch: {
@@ -2532,11 +1777,6 @@ export interface components {
              */
             created_at: string;
         };
-        /** OccurrenceListResponse */
-        OccurrenceListResponse: {
-            /** Occurrences */
-            occurrences: components["schemas"]["EventOccurrence"][];
-        };
         /** OverwriteCompleteRequest */
         OverwriteCompleteRequest: {
             /** Parts */
@@ -2550,6 +1790,8 @@ export interface components {
             size: number;
             /** Mime */
             mime?: string | null;
+            /** Wrapped Dek */
+            wrapped_dek?: string | null;
         };
         /** PartUrlResponse */
         PartUrlResponse: {
@@ -2557,73 +1799,6 @@ export interface components {
             url: string;
             /** Expires In */
             expires_in: number;
-        };
-        /**
-         * PublicBookingResponse
-         * @description 제출 직후 응답: 예약자에게 보여줄 정보 + cancel 링크용 token.
-         */
-        PublicBookingResponse: {
-            /** Cancel Token */
-            cancel_token: string;
-            /**
-             * Slot Start At
-             * Format: date-time
-             */
-            slot_start_at: string;
-            /**
-             * Slot End At
-             * Format: date-time
-             */
-            slot_end_at: string;
-            /** Title */
-            title: string;
-        };
-        /** PublicBookingSubmit */
-        PublicBookingSubmit: {
-            /**
-             * Slot Start At
-             * Format: date-time
-             */
-            slot_start_at: string;
-            /** Customer Name */
-            customer_name: string;
-            /**
-             * Customer Email
-             * Format: email
-             */
-            customer_email: string;
-            /** Customer Message */
-            customer_message?: string | null;
-            /** Consent */
-            consent: boolean;
-            /** Website */
-            website?: string | null;
-        };
-        /**
-         * PublicBookingTypeResponse
-         * @description 공개 표시: 운영자 신원 노출 X.
-         */
-        PublicBookingTypeResponse: {
-            /** Public Key */
-            public_key: string;
-            /** Title */
-            title: string;
-            /** Description */
-            description: string | null;
-            /** Duration Minutes */
-            duration_minutes: number;
-            /** Timezone */
-            timezone: string;
-            /** Capacity */
-            capacity: number;
-            /** Minimum Notice Minutes */
-            minimum_notice_minutes: number;
-            /** Lookahead Days */
-            lookahead_days: number;
-            /** Privacy Policy Url */
-            privacy_policy_url: string | null;
-            /** Organization Name */
-            organization_name: string;
         };
         /** PublicDownloadRequest */
         PublicDownloadRequest: {
@@ -2657,26 +1832,6 @@ export interface components {
             /** Requires Password */
             requires_password: boolean;
         };
-        /** PublicSlotItem */
-        PublicSlotItem: {
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-            /** Remaining */
-            remaining: number;
-        };
-        /** PublicSlotListResponse */
-        PublicSlotListResponse: {
-            /** Slots */
-            slots: components["schemas"]["PublicSlotItem"][];
-        };
         /** QuotaPatch */
         QuotaPatch: {
             /**
@@ -2687,12 +1842,17 @@ export interface components {
         };
         /** QuotaResponse */
         QuotaResponse: {
-            /** Company Id */
-            company_id: string;
+            /** Workspace Id */
+            workspace_id: string;
             /** Storage Bytes Limit */
             storage_bytes_limit: number | null;
             /** Storage Bytes Used */
             storage_bytes_used: number;
+            /**
+             * Version Bytes Used
+             * @default 0
+             */
+            version_bytes_used: number;
             /** Storage Pct */
             storage_pct: number | null;
         };
@@ -2704,35 +1864,10 @@ export interface components {
              */
             role: "admin" | "member";
         };
-        /** SearchEventItem */
-        SearchEventItem: {
-            /** Id */
-            id: string;
-            /** Calendar Id */
-            calendar_id: string;
-            /** Title */
-            title: string;
-            /** Description */
-            description: string | null;
-            /** Location */
-            location: string | null;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-        };
         /** SearchResponse */
         SearchResponse: {
             /** Nodes */
             nodes: components["schemas"]["NodeResponse"][];
-            /** Events */
-            events: components["schemas"]["SearchEventItem"][];
         };
         /** SmtpConfigPatch */
         SmtpConfigPatch: {
@@ -2787,14 +1922,30 @@ export interface components {
             /** To */
             to: string;
         };
-        /** SubscriptionResponse */
-        SubscriptionResponse: {
-            /** Enabled */
-            enabled: boolean;
-            /** Token */
-            token: string | null;
-            /** Url */
-            url: string | null;
+        /** TeamFolderCreate */
+        TeamFolderCreate: {
+            /** Department Id */
+            department_id: string;
+            /** Name */
+            name: string;
+        };
+        /** TeamFolderResponse */
+        TeamFolderResponse: {
+            /** Node Id */
+            node_id: string;
+            /** Name */
+            name: string;
+            /** Department Id */
+            department_id: string;
+            /** Department Name */
+            department_name?: string | null;
+            /** Created By */
+            created_by: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** TrashEmptyResponse */
         TrashEmptyResponse: {
@@ -2822,6 +1973,8 @@ export interface components {
              * @enum {string}
              */
             scope: "personal" | "shared";
+            /** Wrapped Dek */
+            wrapped_dek?: string | null;
         };
         /** UploadUrlResponse */
         UploadUrlResponse: {
@@ -2853,6 +2006,49 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VaultCreate
+         * @description 보안 폴더 생성: node_id(빈 폴더) + 생성자 본인용 wrapped vault_key.
+         */
+        VaultCreate: {
+            /** Node Id */
+            node_id: string;
+            /** Wrapped Vault Key */
+            wrapped_vault_key: string;
+        };
+        /**
+         * VaultMemberCreate
+         * @description 멤버 추가: 대상 user_sub + 그 사람 공개키로 wrap 한 vault_key.
+         */
+        VaultMemberCreate: {
+            /** User Sub */
+            user_sub: string;
+            /** Wrapped Vault Key */
+            wrapped_vault_key: string;
+        };
+        /** VaultMemberOut */
+        VaultMemberOut: {
+            /** User Sub */
+            user_sub: string;
+            /** Created At */
+            created_at: string;
+        };
+        /** VaultOut */
+        VaultOut: {
+            /** Node Id */
+            node_id: string;
+            /** Workspace Id */
+            workspace_id: string;
+            /** Created By */
+            created_by: string;
+            /**
+             * Is Member
+             * @default false
+             */
+            is_member: boolean;
+            /** My Permission */
+            my_permission?: string | null;
         };
         /** WebhookDeliveryList */
         WebhookDeliveryList: {
@@ -2925,6 +2121,96 @@ export interface components {
             /** Secret */
             secret?: string | null;
         };
+        /** WorkspaceListItem */
+        WorkspaceListItem: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Member Count */
+            member_count: number;
+            /** Admin Count */
+            admin_count: number;
+        };
+        /** WorkspaceListResponse */
+        WorkspaceListResponse: {
+            /** Workspaces */
+            workspaces: components["schemas"]["WorkspaceListItem"][];
+        };
+        /** WorkspaceMember */
+        WorkspaceMember: {
+            /** Sub */
+            sub: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name: string | null;
+        };
+        /** WorkspaceMembersResponse */
+        WorkspaceMembersResponse: {
+            /** Members */
+            members: components["schemas"]["WorkspaceMember"][];
+        };
+        /** WorkspaceSmtpPatch */
+        WorkspaceSmtpPatch: {
+            /** Host */
+            host: string;
+            /** Port */
+            port: number;
+            /**
+             * Smtp User
+             * @default
+             */
+            smtp_user: string;
+            /**
+             * Smtp Password
+             * @default
+             */
+            smtp_password: string;
+            /**
+             * Tls Mode
+             * @default none
+             */
+            tls_mode: string;
+            /** From Addr */
+            from_addr: string;
+            /**
+             * From Name
+             * @default
+             */
+            from_name: string;
+        };
+        /** WorkspaceSmtpResponse */
+        WorkspaceSmtpResponse: {
+            /** Override Enabled */
+            override_enabled: boolean;
+            /** Host */
+            host: string;
+            /** Port */
+            port: number;
+            /** Smtp User */
+            smtp_user: string;
+            /** Smtp Password */
+            smtp_password: string;
+            /** Tls Mode */
+            tls_mode: string;
+            /** From Addr */
+            from_addr: string;
+            /** From Name */
+            from_name: string;
+            /** Effective Source */
+            effective_source: string;
+        };
+        /**
+         * WrappedKeyOut
+         * @description 내 wrapped vault_key: 클라이언트가 개인키로 풀어 vault_key 복원.
+         */
+        WrappedKeyOut: {
+            /** Node Id */
+            node_id: string;
+            /** Wrapped Vault Key */
+            wrapped_vault_key: string;
+        };
         /**
          * SmtpConnectionTestRequest
          * @description 폼 값으로 즉시 연결 테스트 (저장 전). password 가 빈 값/마스킹이면 DB row 값 사용.
@@ -2950,11 +2236,58 @@ export interface components {
              */
             tls_mode: string;
         };
+        /** MemberItem */
+        app__api__v1__admin_workspaces__MemberItem: {
+            /** User Sub */
+            user_sub: string;
+            /** Email */
+            email: string | null;
+            /** Name */
+            name: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+        };
+        /** MemberListResponse */
+        app__api__v1__admin_workspaces__MemberListResponse: {
+            /** Members */
+            members: components["schemas"]["app__api__v1__admin_workspaces__MemberItem"][];
+        };
+        /** MemberItem */
+        app__api__v1__workspace_members__MemberItem: {
+            /** User Sub */
+            user_sub: string;
+            /** Email */
+            email: string | null;
+            /** Name */
+            name: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+            /**
+             * Storage Bytes Used
+             * @default 0
+             */
+            storage_bytes_used: number;
+            /** Storage Bytes Limit */
+            storage_bytes_limit?: number | null;
+        };
+        /** MemberListResponse */
+        app__api__v1__workspace_members__MemberListResponse: {
+            /** Account Workspace Id */
+            account_workspace_id?: string | null;
+            /** Members */
+            members: components["schemas"]["app__api__v1__workspace_members__MemberItem"][];
+        };
         /**
          * SmtpConnectionTestRequest
          * @description 폼 값 기반 연결 테스트. password 가 빈/마스킹이면 DB row 값 사용.
          */
-        app__api__v1__company_smtp__SmtpConnectionTestRequest: {
+        app__api__v1__workspace_smtp__SmtpConnectionTestRequest: {
             /** Host */
             host: string;
             /** Port */
@@ -2987,7 +2320,9 @@ export interface operations {
     get_me_api_v1_me_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3004,12 +2339,53 @@ export interface operations {
                     };
                 };
             };
-            /** @description JWT 없음·만료·서명 불일치 또는 revoked sid */
+            /** @description JWT 없음·만료·서명·iss·aud 불일치 */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_storage_api_v1_me_storage_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyStorageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -3017,7 +2393,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3051,7 +2428,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description parent_id 가 존재하지 않거나 다른 회사 (마스킹) */
+            /** @description parent_id 가 존재하지 않거나 다른 워크스페이스 (마스킹) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3076,9 +2453,12 @@ export interface operations {
                 parent_id?: string | null;
                 /** @description 루트(`parent_id=null`)에서만 의미. 폴더 안에서는 부모의 scope 상속. */
                 scope?: string;
+                /** @description True 면 scope 전체 서브트리(모든 깊이) 평탄 반환: desktop sync 용. parent_id 무시. */
+                recursive?: boolean;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3123,7 +2503,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3154,7 +2535,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3185,7 +2567,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3219,7 +2602,8 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3253,11 +2637,44 @@ export interface operations {
             };
         };
     };
+    node_events_api_v1_nodes_events_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ancestors_api_v1_nodes__node_id__ancestors_get: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3275,7 +2692,7 @@ export interface operations {
                     "application/json": components["schemas"]["AncestorsResponse"];
                 };
             };
-            /** @description 노드 없음 또는 다른 회사 */
+            /** @description 노드 없음 또는 다른 워크스페이스 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3297,7 +2714,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3322,7 +2740,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 다른 회사 또는 권한 없는 personal (마스킹) */
+            /** @description 다른 워크스페이스 또는 권한 없는 personal (마스킹) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -3345,7 +2763,8 @@ export interface operations {
             query?: never;
             header: {
                 "If-Match"?: string | null;
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3391,7 +2810,8 @@ export interface operations {
             query?: never;
             header: {
                 "If-Match"?: string | null;
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3449,7 +2869,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3496,7 +2917,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -3552,7 +2974,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3600,7 +3023,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3651,7 +3075,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3699,7 +3124,8 @@ export interface operations {
             query?: never;
             header: {
                 "If-Match"?: string | null;
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3749,7 +3175,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description 회사 스토리지 quota 초과 */
+            /** @description 워크스페이스 스토리지 quota 초과 */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -3771,7 +3197,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3825,7 +3252,8 @@ export interface operations {
                 purpose?: string;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3872,7 +3300,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3920,7 +3349,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -3967,7 +3397,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -4025,7 +3456,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -4071,7 +3503,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -4111,7 +3544,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -4162,7 +3596,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -4204,282 +3639,15 @@ export interface operations {
             };
         };
     };
-    list_calendars_api_v1_calendars_get: {
+    list_versions_api_v1_nodes__node_id__versions_get: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CalendarListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_calendar_api_v1_calendars_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CalendarCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CalendarResponse"];
-                };
-            };
-            /** @description external_ics_url 형식 오류 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description ICS 본문 5MB 초과 */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description ICS 피드 fetch 실패 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    delete_calendar_api_v1_calendars__calendar_id__delete: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
-                calendar_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 권한 없음 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_calendar_api_v1_calendars__calendar_id__patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                calendar_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CalendarPatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CalendarResponse"];
-                };
-            };
-            /** @description write 권한 없음: personal 의 owner 아님 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 없거나 다른 회사 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    export_calendar_ics_api_v1_calendars__calendar_id__ics_get: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                calendar_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description .ics 본문 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "text/calendar": unknown;
-                };
-            };
-            /** @description 캘린더 없음 또는 접근 불가 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_preferences_api_v1_calendars__calendar_id__preferences_patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                calendar_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CalendarPreferencePatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CalendarResponse"];
-                };
-            };
-            /** @description 캘린더 없음 또는 접근 불가 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_calendar_api_v1_calendars__calendar_id__refresh_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                calendar_id: string;
+                node_id: string;
             };
             cookie?: never;
         };
@@ -4491,80 +3659,8 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CalendarResponse"];
+                    "application/json": components["schemas"]["FileVersionResponse"][];
                 };
-            };
-            /** @description external_ics 가 아닌 캘린더 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description ICS 본문 5MB 초과 */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description ICS 피드 fetch 실패 */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    import_ics_api_v1_calendars__calendar_id__import_ics_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                calendar_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_import_ics_api_v1_calendars__calendar_id__import_ics_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IcsImportResponse"];
-                };
-            };
-            /** @description 외부 ICS 구독 캘린더에는 import 불가 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 파일 5MB 초과 */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4577,14 +3673,16 @@ export interface operations {
             };
         };
     };
-    get_subscription_api_v1_calendars__calendar_id__subscription_get: {
+    version_download_url_api_v1_nodes__node_id__versions__version_id__download_url_post: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
-                calendar_id: string;
+                node_id: string;
+                version_id: string;
             };
             cookie?: never;
         };
@@ -4596,7 +3694,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SubscriptionResponse"];
+                    "application/json": components["schemas"]["FileVersionDownloadUrl"];
                 };
             };
             /** @description Validation Error */
@@ -4610,14 +3708,16 @@ export interface operations {
             };
         };
     };
-    enable_subscription_api_v1_calendars__calendar_id__subscription_post: {
+    restore_version_api_v1_nodes__node_id__versions__version_id__restore_post: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
-                calendar_id: string;
+                node_id: string;
+                version_id: string;
             };
             cookie?: never;
         };
@@ -4629,8 +3729,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SubscriptionResponse"];
+                    "application/json": components["schemas"]["NodeResponse"];
                 };
+            };
+            /** @description 업로드·교체가 진행 중인 파일 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4643,14 +3750,16 @@ export interface operations {
             };
         };
     };
-    disable_subscription_api_v1_calendars__calendar_id__subscription_delete: {
+    delete_version_api_v1_nodes__node_id__versions__version_id__delete: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
-                calendar_id: string;
+                node_id: string;
+                version_id: string;
             };
             cookie?: never;
         };
@@ -4658,489 +3767,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rotate_subscription_api_v1_calendars__calendar_id__subscription_rotate_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                calendar_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubscriptionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_events_api_v1_events_get: {
-        parameters: {
-            query: {
-                /** @description ISO datetime (tz-aware) */
-                from: string;
-                /** @description ISO datetime. 400일 이내. */
-                to: string;
-                /** @description 특정 캘린더만 조회. 미지정 시 가시 캘린더 전부. */
-                calendar_ids?: string[] | null;
-            };
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OccurrenceListResponse"];
-                };
-            };
-            /** @description 범위 잘못됨 (to <= from) 또는 400일 초과 */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_event_api_v1_events_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventResponse"];
-                };
-            };
-            /** @description end_at < start_at */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 캘린더 write 권한 없음 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description external_ics 캘린더: read-only */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    export_event_ics_api_v1_events__event_id__ics_get: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description .ics 본문 */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "text/calendar": unknown;
-                };
-            };
-            /** @description 이벤트 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_event_api_v1_events__event_id__get: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventResponse"];
-                };
-            };
-            /** @description 이벤트/캘린더 없음 또는 접근 불가 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_event_api_v1_events__event_id__delete: {
-        parameters: {
-            query?: {
-                /** @description ISO datetime. 주어지면 그 occurrence 만 EXDATE 처리: series 유지. */
-                occurrence?: string | null;
-            };
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description write 권한 없음 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description external_ics 캘린더 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    patch_event_api_v1_events__event_id__patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventPatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventResponse"];
-                };
-            };
-            /** @description end_at < start_at */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description write 권한 없음 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description external_ics 캘린더 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_invitations_api_v1_events__event_id__invitations_get: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventInvitationList"];
-                };
-            };
-            /** @description 이벤트 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_invitation_api_v1_events__event_id__invitations_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventInvitationCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventInvitationResponse"];
-                };
-            };
-            /** @description creator/owner 아님 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 이벤트 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_invitation_api_v1_events__event_id__invitations__invitation_id__delete: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-                invitation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description creator/owner 아님 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 초대 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_invitation_api_v1_events__event_id__invitations__invitation_id__patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                event_id: string;
-                invitation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventInvitationPatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventInvitationResponse"];
-                };
-            };
-            /** @description invitee 본인 아님 */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 초대 없음 */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5164,14 +3790,19 @@ export interface operations {
                 from?: string | null;
                 /** @description ISO datetime (exclusive) */
                 to?: string | null;
-                /** @description `node` | `calendar` | `event` | `booking` 필터 */
+                /** @description `node` | `workspace` 등 */
                 entity_type?: string | null;
-                /** @description company=활성 회사 항목 / system=company_id NULL 인 시스템 레벨 항목 */
-                scope?: "company" | "system";
+                /** @description `create` | `update` | `delete` | `share` 등 */
+                action?: string | null;
+                /** @description 특정 사용자(sub)만 */
+                actor_sub?: string | null;
+                /** @description workspace=활성 워크스페이스 / system=workspace_id NULL 시스템 항목 */
+                scope?: "workspace" | "system";
                 limit?: number;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5187,7 +3818,53 @@ export interface operations {
                     "application/json": components["schemas"]["AuditLogListResponse"];
                 };
             };
-            /** @description admin role 아님 */
+            /** @description 권한 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_audit_csv_api_v1_audit_export_csv_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                entity_type?: string | null;
+                action?: string | null;
+                actor_sub?: string | null;
+                scope?: "workspace" | "system";
+            };
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description 권한 없음 */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -5210,10 +3887,15 @@ export interface operations {
             query?: {
                 /** @description true 면 안읽음만 */
                 unread_only?: boolean;
+                /** @description 지정 시 해당 entity_type 만 (앱 스코프). 미지정이면 전체. */
+                entity_types?: string[] | null;
                 limit?: number;
+                /** @description 페이지네이션 오프셋 (히스토리 페이지 '더 보기') */
+                offset?: number;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5243,7 +3925,9 @@ export interface operations {
     get_preferences_api_v1_notifications_preferences_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5258,12 +3942,23 @@ export interface operations {
                     "application/json": components["schemas"]["EmailPreferenceResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     patch_preferences_api_v1_notifications_preferences_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5297,7 +3992,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 notification_id: string;
@@ -5339,9 +4035,13 @@ export interface operations {
     };
     mark_all_read_api_v1_notifications_mark_all_read_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 지정 시 해당 entity_type 알림만 읽음 처리 (앱 스코프). 미지정이면 전체. */
+                entity_types?: string[] | null;
+            };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5372,7 +4072,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5410,7 +4111,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5452,7 +4154,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 endpoint_id: string;
@@ -5497,7 +4200,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 endpoint_id: string;
@@ -5548,7 +4252,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 endpoint_id: string;
@@ -5596,11 +4301,20 @@ export interface operations {
             query: {
                 /** @description 검색어 */
                 q: string;
-                /** @description 섹션별 결과 수 */
+                /** @description 결과 수 */
                 limit?: number;
+                /** @description file | folder */
+                kind?: ("file" | "folder") | null;
+                /** @description image | document | other (파일만) */
+                category?: ("image" | "document" | "other") | null;
+                /** @description 수정일 >= (파일) */
+                modified_from?: string | null;
+                /** @description 수정일 < (파일) */
+                modified_to?: string | null;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5631,7 +4345,8 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5658,7 +4373,7 @@ export interface operations {
             };
         };
     };
-    search_members_api_v1_me_company_members_get: {
+    search_members_api_v1_me_workspace_members_get: {
         parameters: {
             query?: {
                 /** @description email/name ILIKE 매칭. 빈 값이면 최근 정렬. */
@@ -5666,7 +4381,8 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
@@ -5679,7 +4395,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanyMembersResponse"];
+                    "application/json": components["schemas"]["WorkspaceMembersResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5693,10 +4409,12 @@ export interface operations {
             };
         };
     };
-    list_companies_api_v1_admin_companies_get: {
+    list_workspaces_api_v1_admin_workspaces_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5708,17 +4426,28 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanyListResponse"];
+                    "application/json": components["schemas"]["WorkspaceListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    list_members_api_v1_admin_companies__company_id__members_get: {
+    list_members_api_v1_admin_workspaces__workspace_id__members_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -5730,10 +4459,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MemberListResponse"];
+                    "application/json": components["schemas"]["app__api__v1__admin_workspaces__MemberListResponse"];
                 };
             };
-            /** @description 회사 없음 */
+            /** @description 워크스페이스 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5751,12 +4480,14 @@ export interface operations {
             };
         };
     };
-    patch_member_role_api_v1_admin_companies__company_id__members__user_sub__patch: {
+    patch_member_role_api_v1_admin_workspaces__workspace_id__members__user_sub__patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
                 user_sub: string;
             };
             cookie?: never;
@@ -5773,10 +4504,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MemberItem"];
+                    "application/json": components["schemas"]["app__api__v1__admin_workspaces__MemberItem"];
                 };
             };
-            /** @description 멤버십 없음: 그 사용자가 그 회사로 한 번도 로그인 안 함 */
+            /** @description 멤버십 없음: 그 사용자가 그 워크스페이스로 한 번도 로그인 안 함 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -5801,10 +4532,43 @@ export interface operations {
             };
         };
     };
+    list_jobs_api_v1_admin_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_smtp_api_v1_admin_smtp_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5819,12 +4583,23 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     patch_smtp_api_v1_admin_smtp_patch: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5864,7 +4639,9 @@ export interface operations {
     test_smtp_connection_api_v1_admin_smtp_connection_test_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5906,7 +4683,9 @@ export interface operations {
     test_smtp_api_v1_admin_smtp_test_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -5945,12 +4724,14 @@ export interface operations {
             };
         };
     };
-    get_company_smtp_api_v1_companies__company_id__smtp_get: {
+    get_workspace_smtp_api_v1_workspaces__workspace_id__smtp_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -5962,7 +4743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanySmtpResponse"];
+                    "application/json": components["schemas"]["WorkspaceSmtpResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5976,18 +4757,20 @@ export interface operations {
             };
         };
     };
-    put_company_smtp_api_v1_companies__company_id__smtp_put: {
+    put_workspace_smtp_api_v1_workspaces__workspace_id__smtp_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CompanySmtpPatch"];
+                "application/json": components["schemas"]["WorkspaceSmtpPatch"];
             };
         };
         responses: {
@@ -5997,7 +4780,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanySmtpResponse"];
+                    "application/json": components["schemas"]["WorkspaceSmtpResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6011,12 +4794,14 @@ export interface operations {
             };
         };
     };
-    delete_company_smtp_api_v1_companies__company_id__smtp_delete: {
+    delete_workspace_smtp_api_v1_workspaces__workspace_id__smtp_delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -6040,18 +4825,20 @@ export interface operations {
             };
         };
     };
-    test_company_smtp_connection_api_v1_companies__company_id__smtp_connection_test_post: {
+    test_workspace_smtp_connection_api_v1_workspaces__workspace_id__smtp_connection_test_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["app__api__v1__company_smtp__SmtpConnectionTestRequest"];
+                "application/json": components["schemas"]["app__api__v1__workspace_smtp__SmtpConnectionTestRequest"];
             };
         };
         responses: {
@@ -6084,12 +4871,14 @@ export interface operations {
             };
         };
     };
-    test_company_smtp_api_v1_companies__company_id__smtp_test_post: {
+    test_workspace_smtp_api_v1_workspaces__workspace_id__smtp_test_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -6128,12 +4917,14 @@ export interface operations {
             };
         };
     };
-    get_profile_api_v1_companies__company_id__profile_get: {
+    list_members_api_v1_workspaces__workspace_id__members_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -6145,7 +4936,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CompanyProfileResponse"];
+                    "application/json": components["schemas"]["app__api__v1__workspace_members__MemberListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6159,85 +4950,21 @@ export interface operations {
             };
         };
     };
-    put_profile_api_v1_companies__company_id__profile_put: {
+    put_member_quota_api_v1_workspaces__workspace_id__members__user_sub__quota_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CompanyProfilePatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CompanyProfileResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_members_api_v1_companies__company_id__members_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MemberListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_member_role_api_v1_companies__company_id__members__user_sub__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
+                workspace_id: string;
                 user_sub: string;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RolePatch"];
+                "application/json": components["schemas"]["MemberQuotaPatch"];
             };
         };
         responses: {
@@ -6247,7 +4974,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MemberItem"];
+                    "application/json": components["schemas"]["app__api__v1__workspace_members__MemberItem"];
                 };
             };
             /** @description 멤버십 없음 */
@@ -6268,12 +4995,14 @@ export interface operations {
             };
         };
     };
-    get_company_quota_api_v1_companies__company_id__quota_get: {
+    get_workspace_quota_api_v1_workspaces__workspace_id__quota_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -6299,12 +5028,14 @@ export interface operations {
             };
         };
     };
-    admin_get_quota_api_v1_admin_companies__company_id__quota_get: {
+    admin_get_quota_api_v1_admin_workspaces__workspace_id__quota_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -6330,12 +5061,14 @@ export interface operations {
             };
         };
     };
-    admin_put_quota_api_v1_admin_companies__company_id__quota_put: {
+    admin_put_quota_api_v1_admin_workspaces__workspace_id__quota_put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
-                company_id: string;
+                workspace_id: string;
             };
             cookie?: never;
         };
@@ -6365,11 +5098,11 @@ export interface operations {
             };
         };
     };
-    list_booking_types_api_v1_booking_types_get: {
+    get_my_keys_api_v1_e2e_keys_me_get: {
         parameters: {
             query?: never;
-            header: {
-                "X-Active-Company-Id": string;
+            header?: {
+                authorization?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6382,7 +5115,49 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookingTypeListResponse"];
+                    "application/json": components["schemas"]["E2EKeyBundle"];
+                };
+            };
+            /** @description 아직 E2E 키 미설정 (vault 첫 사용 전) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_my_keys_api_v1_e2e_keys_me_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["E2EKeyBundle"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["E2EKeyBundle"];
                 };
             };
             /** @description Validation Error */
@@ -6396,38 +5171,111 @@ export interface operations {
             };
         };
     };
-    create_booking_type_api_v1_booking_types_post: {
+    get_public_key_api_v1_e2e_keys__user_sub__public_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_sub: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["E2EPublicKey"];
+                };
+            };
+            /** @description 그 사용자가 E2E 키 미설정 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_vaults_api_v1_e2e_vaults_get: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VaultOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_vault_api_v1_e2e_vaults_post: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BookingTypeCreate"];
+                "application/json": components["schemas"]["VaultCreate"];
             };
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BookingTypeResponse"];
+                    "application/json": components["schemas"]["VaultOut"];
                 };
             };
-            /** @description target_calendar 가 owner 와 다른 컨텍스트 */
+            /** @description folder 아님 / 비어있지 않음 / 이미 vault */
             400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description owner_type=company 인데 회사 admin 아님 */
+            /** @description folder write 권한 없음 */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -6445,525 +5293,12 @@ export interface operations {
             };
         };
     };
-    get_booking_type_api_v1_booking_types__booking_type_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookingTypeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_booking_type_api_v1_booking_types__booking_type_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_booking_type_api_v1_booking_types__booking_type_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BookingTypePatch"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookingTypeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_bookings_of_type_api_v1_booking_types__booking_type_id__bookings_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    operator_reschedule_booking_api_v1_booking_types__booking_type_id__bookings__booking_id__reschedule_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-                booking_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description BookingType 또는 Booking 없음/불일치 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description 새 슬롯 만석/충돌 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description force=false 인데 가용 외 시각 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    operator_cancel_booking_api_v1_booking_types__booking_type_id__bookings__booking_id__cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-                booking_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description BookingType 또는 Booking 없음/불일치 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rotate_public_key_api_v1_booking_types__booking_type_id__rotate_key_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                booking_type_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BookingTypeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_templates_api_v1_companies__company_id__email_templates_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailTemplateListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_template_api_v1_companies__company_id__email_templates__event_type__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-                event_type: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailTemplateDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    put_template_api_v1_companies__company_id__email_templates__event_type__put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-                event_type: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailTemplatePut"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailTemplateDetail"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_template_api_v1_companies__company_id__email_templates__event_type__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-                event_type: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_template_api_v1_companies__company_id__email_templates__event_type__preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                company_id: string;
-                event_type: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EmailTemplatePreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EmailTemplatePreviewResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_tokens_api_v1_me_caldav_tokens_get: {
+    get_vault_key_api_v1_e2e_vaults__node_id__key_get: {
         parameters: {
             query?: never;
             header: {
-                "X-Active-Company-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CalDavTokenList"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_token_api_v1_me_caldav_tokens_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CalDavTokenCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CalDavTokenCreated"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    revoke_token_api_v1_me_caldav_tokens__token_id__delete: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
-            };
-            path: {
-                token_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_config_api_v1_onlyoffice_config__node_id__get: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-Active-Company-Id": string;
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
                 node_id: string;
@@ -6978,6 +5313,198 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["WrappedKeyOut"];
+                };
+            };
+            /** @description vault 없음 또는 비멤버 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_vault_members_api_v1_e2e_vaults__node_id__members_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VaultMemberOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_vault_member_api_v1_e2e_vaults__node_id__members_post: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VaultMemberCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VaultMemberOut"];
+                };
+            };
+            /** @description vault 없음 또는 요청자 비멤버 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 이미 멤버 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_vault_member_api_v1_e2e_vaults__node_id__members__member_sub__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path: {
+                node_id: string;
+                member_sub: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_groups_api_v1_groups_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    my_access_set_api_v1_groups_my_access_set_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": {
                         [key: string]: unknown;
                     };
@@ -6994,13 +5521,14 @@ export interface operations {
             };
         };
     };
-    serve_file_api_v1_onlyoffice_files__token__get: {
+    list_my_team_folders_api_v1_team_folders_get: {
         parameters: {
             query?: never;
-            header?: never;
-            path: {
-                token: string;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -7011,7 +5539,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["TeamFolderResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -7025,129 +5553,19 @@ export interface operations {
             };
         };
     };
-    callback_api_v1_onlyoffice_callback__token__post: {
+    create_team_folder_api_v1_team_folders_post: {
         parameters: {
             query?: never;
-            header?: never;
-            path: {
-                token: string;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: number;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_public_booking_type_api_public_v1_booking__public_key__get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-forwarded-for"?: string | null;
-            };
-            path: {
-                public_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PublicBookingTypeResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_slots_api_public_v1_booking__public_key__slots_get: {
-        parameters: {
-            query: {
-                from: string;
-                to: string;
-            };
-            header?: {
-                "x-forwarded-for"?: string | null;
-            };
-            path: {
-                public_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PublicSlotListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    submit_booking_api_public_v1_booking__public_key__submit_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "user-agent"?: string | null;
-                "x-forwarded-for"?: string | null;
-            };
-            path: {
-                public_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublicBookingSubmit"];
+                "application/json": components["schemas"]["TeamFolderCreate"];
             };
         };
         responses: {
@@ -7157,57 +5575,17 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublicBookingResponse"];
+                    "application/json": components["schemas"]["TeamFolderResponse"];
                 };
             };
-            /** @description 슬롯 만석 또는 차단 */
-            409: {
+            /** @description 워크스페이스 admin 아님 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description 동의 미체크, 가용 외 슬롯, validation 실패 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description rate limit */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    cancel_api_public_v1_booking_cancel__cancel_token__post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-forwarded-for"?: string | null;
-            };
-            path: {
-                cancel_token: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description 유효하지 않은 토큰 */
+            /** @description 부서 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7225,29 +5603,35 @@ export interface operations {
             };
         };
     };
-    public_calendar_ics_api_public_v1_calendars__token__ics_get: {
+    delete_team_folder_api_v1_team_folders__node_id__delete: {
         parameters: {
             query?: never;
-            header?: {
-                "x-forwarded-for"?: string | null;
+            header: {
+                authorization?: string | null;
+                "X-Active-Workspace-Id": string;
             };
             path: {
-                token: string;
+                node_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            200: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": unknown;
-                };
+                content?: never;
             };
-            /** @description 활성화되지 않았거나 토큰 무효 */
+            /** @description 워크스페이스 admin 아님 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 팀 폴더 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -7262,13 +5646,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-            /** @description Rate limit */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

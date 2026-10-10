@@ -139,20 +139,20 @@
   <div class="card">
     <span class="badge done">완료</span>
     <h3><span class="num">8</span>Sync 범위</h3>
-    <p><span class="pick">Personal + Shared (회사×{내 파일,회사 공유}).</span> Trash 제외 (Windows 휴지통과 혼동 방지). ExternalLink 는 외부 사용자용이라 무관. FileShare 받은 것은 후속.</p>
+    <p><span class="pick">Personal + Shared (워크스페이스×{내 파일,워크스페이스}).</span> Trash 제외 (Windows 휴지통과 혼동 방지). ExternalLink 는 외부 사용자용이라 무관. FileShare 받은 것은 후속.</p>
   </div>
 
   <div class="card">
     <span class="badge wip">수정됨</span>
-    <h3><span class="num">9</span>Multi-company: 회사별 root 폴더</h3>
-    <p><span class="pick">활성 회사 전환 개념 없음: 동시 sync.</span> <code>~\Ashfield\{회사}\...</code> 웹 sidebar 와 1:1.</p>
-    <div class="amend"><b>2026-06-12 수정:</b> 온보딩에서 sync 회사 선택(opt-in) → <b>opt-out 모델</b>로 변경. 기본 = 전체 회사 sync (placeholder 라 디스크 비용 ~0). 제외는 설정 화면 toggle. 신규 회사 배정 시 자동 등장. 온보딩 = 로그인 + 폴더 위치 확인만.</div>
+    <h3><span class="num">9</span>Multi-workspace: 워크스페이스별 root 폴더</h3>
+    <p><span class="pick">활성 워크스페이스 전환 개념 없음: 동시 sync.</span> <code>~\Ashfield\{워크스페이스}\...</code> 웹 sidebar 와 1:1.</p>
+    <div class="amend"><b>2026-06-12 수정:</b> 온보딩에서 sync 워크스페이스 선택(opt-in) → <b>opt-out 모델</b>로 변경. 기본 = 전체 워크스페이스 sync (placeholder 라 디스크 비용 ~0). 제외는 설정 화면 toggle. 신규 워크스페이스 배정 시 자동 등장. 온보딩 = 로그인 + 폴더 위치 확인만.</div>
   </div>
 
   <div class="card">
     <span class="badge todo">Phase 4 검토</span>
     <h3><span class="num">10</span>Multi-device 자동</h3>
-    <p><span class="pick">backend 는 device 추적 안 함.</span> 회사 PC + 집 PC 동시 OK: 충돌은 ETag + 충돌 사본으로. device registration 은 SaaS 단계 검토.</p>
+    <p><span class="pick">backend 는 device 추적 안 함.</span> 업무용 PC + 집 PC 동시 OK: 충돌은 ETag + 충돌 사본으로. device registration 은 SaaS 단계 검토.</p>
   </div>
 
   <div class="card">
@@ -182,7 +182,7 @@
   <div class="step"><b>Phase 1: POC ✅</b>OAuth ✓ · 자동 refresh ✓ · tree ✓ · 설정 저장 ✓ · delta polling ✓ · VFS placeholder + hydrate ✓</div>
   <div class="step"><b>Phase 2: 양방향 ✅</b>로컬 변경 감지 ✓ · 양방향 sync ✓ · 충돌 사본 ✓ · 대용량 multipart 업로드 ✓ &nbsp;(남음: OpenAPI contract)</div>
   <div class="step"><b>Phase 3: 외부 배포 ✅</b>트레이 상주 ✓ · 온보딩 마법사 ✓ · 자동 업데이트(minisign) ✓ · SSE nudge ✓ · OpenAPI 타입 자동생성 ✓ · 커스텀 타이틀바 ✓ &nbsp;(보류: Authenticode 서명)</div>
-  <div class="step"><b>Phase 4: SaaS</b>Multi-company UI · 다국어 · Sentry · device registration</div>
+  <div class="step"><b>Phase 4: SaaS</b>Multi-workspace UI · 다국어 · Sentry · device registration</div>
 </div>
 
 <h2>대안 비교 (원 ADR)</h2>

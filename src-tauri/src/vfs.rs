@@ -17,8 +17,8 @@ pub struct PlaceholderFile {
     pub name: String,
     /// backend node id: hydration callback 에서 어떤 파일인지 식별 (FileIdentity)
     pub node_id: String,
-    /// 회사 ID: download-url 호출의 X-Active-Company-Id (FileIdentity 에 함께 인코딩)
-    pub company_id: String,
+    /// 워크스페이스 ID: download-url 호출의 X-Active-Workspace-Id (FileIdentity 에 함께 인코딩)
+    pub workspace_id: String,
     pub size: i64,
     /// epoch millis (UTC): updated_at
     pub mtime_ms: i64,
@@ -240,7 +240,7 @@ mod imp {
     ) -> Result<(), String> {
         let ctx = CTX.get().ok_or("vfs_connect 안 됨")?;
         let identity = String::from_utf8(identity).map_err(|_| "identity utf8 아님")?;
-        let (company, node_id) = identity
+        let (workspace, node_id) = identity
             .split_once('\n')
             .ok_or("identity 형식 오류 (재 populate 필요: 옛 placeholder)")?;
 
@@ -254,7 +254,7 @@ mod imp {
                     ctx.config.api_url, node_id
                 ))
                 .bearer_auth(token)
-                .header("X-Active-Company-Id", urlencoding::encode(company).as_ref())
+                .header("X-Active-Workspace-Id", urlencoding::encode(workspace).as_ref())
                 .send()
                 .map_err(|e| format!("download-url POST: {e}"))
         };
@@ -451,7 +451,7 @@ mod imp {
         dirs: &[String],
         files: &[PlaceholderFile],
     ) -> Result<u32, String> {
-        // 0. base_dir 자체: 회사/영역 폴더. 루트 바로 아래 파일만 있으면
+        // 0. base_dir 자체: 워크스페이스/영역 폴더. 루트 바로 아래 파일만 있으면
         //    dirs 가 비어서 이 폴더가 안 만들어지는 사고 (0x80070003)
         crate::watcher::mark_self_write(std::path::Path::new(base_dir));
         std::fs::create_dir_all(base_dir)
@@ -492,10 +492,10 @@ mod imp {
 
             // wide string / identity 버퍼는 CfCreatePlaceholders 호출까지 살아있어야 함
             let names: Vec<HSTRING> = group.iter().map(|f| HSTRING::from(f.name.as_str())).collect();
-            // FileIdentity = "회사ID\n노드ID": hydration 의 download-url 호출에 둘 다 필요
+            // FileIdentity = "워크스페이스ID\n노드ID": hydration 의 download-url 호출에 둘 다 필요
             let identities: Vec<String> = group
                 .iter()
-                .map(|f| format!("{}\n{}", f.company_id, f.node_id))
+                .map(|f| format!("{}\n{}", f.workspace_id, f.node_id))
                 .collect();
 
             let mut entries: Vec<CF_PLACEHOLDER_CREATE_INFO> = group
@@ -634,7 +634,7 @@ pub fn vfs_encrypt_to_temp(src: String, dek: String) -> Result<String, String> {
     Ok(tmp.to_string_lossy().into_owned())
 }
 
-/// 회사 폴더 통째 제거: sync 제외 toggle 시. 없으면 무시.
+/// 워크스페이스 폴더 통째 제거: sync 제외 toggle 시. 없으면 무시.
 #[tauri::command]
 pub fn vfs_remove_dir(path: String) -> Result<(), String> {
     // 우리(reconcile) 의 삭제: watcher 가 delete 로 잡아 서버 삭제로 되돌리지

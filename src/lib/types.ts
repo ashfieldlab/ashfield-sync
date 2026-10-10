@@ -27,9 +27,9 @@ export interface MeResponse {
   sub: string
   name: string | null
   email: string
-  // backend 는 JWT 의 groups claim 을 그대로 회사 목록으로 반환: 필드명 'groups'.
+  // backend 는 JWT 의 groups claim 을 그대로 워크스페이스 목록으로 반환: 필드명 'groups'.
   groups: string[]
   roles: string[]
   is_system_admin: boolean
-  company_roles: Record<string, string>
+  workspace_roles: Record<string, string>
 }

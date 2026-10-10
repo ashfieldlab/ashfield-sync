@@ -6,8 +6,8 @@
  *
  * 키:
  *   syncRoot           sync 폴더 위치 (default ~\Ashfield)
- *   excludedCompanies  opt-out 회사 목록 (default 빈 배열 = 전체 sync)
- *   lastSyncByCompany  회사별 delta polling 의 since 기준 (ISO): 회사마다
+ *   excludedWorkspaces  opt-out 워크스페이스 목록 (default 빈 배열 = 전체 sync)
+ *   lastSyncByWorkspace  워크스페이스별 delta polling 의 since 기준 (ISO): 워크스페이스마다
  *                      변경 스트림이 독립이라 단일 시각으로는 안 됨
  */
 
@@ -16,7 +16,7 @@ import { load, type Store } from "@tauri-apps/plugin-store"
 
 export interface Settings {
   syncRoot: string
-  excludedCompanies: string[]
+  excludedWorkspaces: string[]
 }
 
 let _store: Store | null = null
@@ -36,7 +36,7 @@ export async function getSettings(): Promise<Settings> {
   const s = await store()
   return {
     syncRoot: (await s.get<string>("syncRoot")) ?? (await defaultSyncRoot()),
-    excludedCompanies: (await s.get<string[]>("excludedCompanies")) ?? [],
+    excludedWorkspaces: (await s.get<string[]>("excludedWorkspaces")) ?? [],
   }
 }
 
@@ -63,20 +63,20 @@ export async function setOnboarded(v: boolean): Promise<void> {
   await s.set("onboarded", v)
 }
 
-export async function setExcludedCompanies(companies: string[]): Promise<void> {
+export async function setExcludedWorkspaces(workspaces: string[]): Promise<void> {
   const s = await store()
-  await s.set("excludedCompanies", companies)
+  await s.set("excludedWorkspaces", workspaces)
 }
 
-export async function getLastSync(companyId: string): Promise<string | null> {
+export async function getLastSync(workspaceId: string): Promise<string | null> {
   const s = await store()
-  const map = (await s.get<Record<string, string>>("lastSyncByCompany")) ?? {}
-  return map[companyId] ?? null
+  const map = (await s.get<Record<string, string>>("lastSyncByWorkspace")) ?? {}
+  return map[workspaceId] ?? null
 }
 
-export async function setLastSync(companyId: string, iso: string): Promise<void> {
+export async function setLastSync(workspaceId: string, iso: string): Promise<void> {
   const s = await store()
-  const map = (await s.get<Record<string, string>>("lastSyncByCompany")) ?? {}
-  map[companyId] = iso
-  await s.set("lastSyncByCompany", map)
+  const map = (await s.get<Record<string, string>>("lastSyncByWorkspace")) ?? {}
+  map[workspaceId] = iso
+  await s.set("lastSyncByWorkspace", map)
 }

@@ -2,7 +2,7 @@
  * Ashfield Drive backend API client.
  *
  * OAuth (PKCE) 인증: access_token 은 메모리에만, refresh 는 Rust keychain.
- * X-Active-Company-Id 헤더 자동 첨부: 한글 회사 ID 면 percent-encode.
+ * X-Active-Workspace-Id 헤더 자동 첨부: 한글 워크스페이스 ID 면 percent-encode.
  *
  * 401 처리: 등록된 refresh handler 를 single-flight 로 한 번 호출 후 재시도.
  * (계정 서버 access_token TTL 15분: 만료가 일상이라 자동 갱신 필수.
@@ -18,7 +18,7 @@ import { fetch } from "@tauri-apps/plugin-http"
 import { env } from "./config"
 
 let _token: string | null = null
-let _activeCompanyId: string | null = null
+let _activeWorkspaceId: string | null = null
 
 // 401 시 호출할 갱신 함수: oauth 모듈이 부팅 때 주입 (순환 import 회피).
 // 인자 = 401 을 받은 토큰(stale). 성공 시 내부에서 setToken 까지 끝내야 함.
@@ -30,8 +30,8 @@ export function setToken(token: string | null): void {
   _token = token
 }
 
-export function setActiveCompany(companyId: string | null): void {
-  _activeCompanyId = companyId
+export function setActiveWorkspace(workspaceId: string | null): void {
+  _activeWorkspaceId = workspaceId
 }
 
 export function hasToken(): boolean {
@@ -71,12 +71,12 @@ interface ApiOptions extends Omit<RequestInit, "body"> {
   body?: unknown
   /** If-Match 헤더: sync 의 optimistic locking */
   ifMatch?: string
-  /** 이 호출만 다른 회사로: 전 회사 순회 (bootstrap/polling) 용 */
-  companyId?: string
+  /** 이 호출만 다른 워크스페이스로: 전 워크스페이스 순회 (bootstrap/polling) 용 */
+  workspaceId?: string
 }
 
 async function doFetch(path: string, options: ApiOptions): Promise<Response> {
-  const { body, ifMatch, companyId, headers: initHeaders, ...rest } = options
+  const { body, ifMatch, workspaceId, headers: initHeaders, ...rest } = options
   const url = path.startsWith("http") ? path : `${env.apiUrl}${path}`
 
   const headers = new Headers(initHeaders)
@@ -86,10 +86,10 @@ async function doFetch(path: string, options: ApiOptions): Promise<Response> {
   if (_token) {
     headers.set("Authorization", `Bearer ${_token}`)
   }
-  const effectiveCompany = companyId ?? _activeCompanyId
-  if (effectiveCompany) {
-    // backend 가 percent-encoded 한글 회사 ID 도 unquote 처리 (CalDAV 패턴 동일).
-    headers.set("X-Active-Company-Id", encodeURIComponent(effectiveCompany))
+  const effectiveWorkspace = workspaceId ?? _activeWorkspaceId
+  if (effectiveWorkspace) {
+    // backend 가 percent-encoded 한글 워크스페이스 ID 도 unquote 처리 (CalDAV 패턴 동일).
+    headers.set("X-Active-Workspace-Id", encodeURIComponent(effectiveWorkspace))
   }
   if (ifMatch) {
     headers.set("If-Match", ifMatch)

@@ -6,7 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { openPath } from "@tauri-apps/plugin-opener"
 
-import { api, ApiError, getToken, setActiveCompany, setRefreshHandler, setToken } from "./lib/api"
+import { api, ApiError, getToken, setActiveWorkspace, setRefreshHandler, setToken } from "./lib/api"
 import { env } from "./lib/config"
 import {
   oauthHasStoredRefresh,
@@ -21,7 +21,7 @@ import {
   getOnboarded,
   getSettings,
   resetSettings,
-  setExcludedCompanies,
+  setExcludedWorkspaces,
   setLastSync,
   setOnboarded,
   setSyncRoot,
@@ -34,7 +34,7 @@ import ashfieldMark from "./assets/ashfield-mark.svg"
 
 interface AppState {
   me: MeResponse | null
-  activeCompany: string | null
+  activeWorkspace: string | null
   nodes: NodeResponse[]
   loading: boolean
   error: string | null
@@ -42,7 +42,7 @@ interface AppState {
 
 const INITIAL_STATE: AppState = {
   me: null,
-  activeCompany: null,
+  activeWorkspace: null,
   nodes: [],
   loading: false,
   error: null,
@@ -115,7 +115,7 @@ function isSyncableName(name: string): boolean {
 }
 
 function scopeLabel(sc: Scope): string {
-  return sc === "personal" ? "내 파일" : "회사 공유"
+  return sc === "personal" ? "내 파일" : "워크스페이스"
 }
 
 function App() {
@@ -143,7 +143,7 @@ function App() {
     }
   }
 
-  // 탐색기에 반영된 (company|scope) → {baseDir, nodeId→{경로,etag}}.
+  // 탐색기에 반영된 (workspace|scope) → {baseDir, nodeId→{경로,etag}}.
   // polling diff 의 기준: 삭제/이동/내용수정 감지.
   const vfsMapRef = useRef<
     Map<
@@ -154,7 +154,7 @@ function App() {
 
   // F2: 절대경로(정규화) → node. 로컬 변경을 backend 호출로 옮길 때 사용.
   const pathIndexRef = useRef<
-    Map<string, { nodeId: string; etag: string | null; companyId: string; scope: Scope; kind: NodeKind; size?: number | null; mtimeMs?: number | null }>
+    Map<string, { nodeId: string; etag: string | null; workspaceId: string; scope: Scope; kind: NodeKind; size?: number | null; mtimeMs?: number | null }>
   >(new Map())
   // 로컬 변경 처리 직렬화: 이벤트 동시 도착 시 race 방지
   const queueRef = useRef<Promise<void>>(Promise.resolve())
@@ -163,14 +163,14 @@ function App() {
   const pendingModifyRef = useRef<Set<string>>(new Set())
   // SSE nudge 가 호출할 즉시-poll 함수 (polling effect 가 최신본 주입)
   const pollNowRef = useRef<null | (() => Promise<void>)>(null)
-  // 활성 회사: refresh handler(stale closure)가 SSE 재연결에 참조
-  const activeCompanyRef = useRef<string | null>(null)
-  // 전 회사·스코프 누적 DEK (node_id → raw base64). vfs_set_deks 가 맵 전체를
+  // 활성 워크스페이스: refresh handler(stale closure)가 SSE 재연결에 참조
+  const activeWorkspaceRef = useRef<string | null>(null)
+  // 전 워크스페이스·스코프 누적 DEK (node_id → raw base64). vfs_set_deks 가 맵 전체를
   // 교체하므로 scope 별 호출이 서로 덮어쓰지 않도록 여기 병합해 통째로 푸시.
   const deksRef = useRef<Record<string, string>>({})
-  // vault 루트 로컬경로(소문자) → {회사, vault 노드 id}. 이 아래의 로컬 변경은
+  // vault 루트 로컬경로(소문자) → {워크스페이스, vault 노드 id}. 이 아래의 로컬 변경은
   // 암호화 업로드 경로(V5c)로 처리: 평문이 서버로 새지 않도록.
-  const vaultRootsRef = useRef<Map<string, { company: string; vaultNodeId: string }>>(new Map())
+  const vaultRootsRef = useRef<Map<string, { workspace: string; vaultNodeId: string }>>(new Map())
 
   // 부팅: 401 자동 refresh handler 주입 + 저장된 refresh_token 있으면 자동 로그인
   useEffect(() => {
@@ -231,7 +231,7 @@ function App() {
     const unlisten = listen<string>("auth-expired", (ev) => {
       console.warn("[auth] expired", ev.payload)
       setToken(null)
-      setActiveCompany(null)
+      setActiveWorkspace(null)
       setState({ ...INITIAL_STATE, error: "세션이 만료되었습니다. Ashfield 계정으로 다시 로그인해주세요." })
     })
     return () => {
@@ -239,12 +239,12 @@ function App() {
     }
   }, [])
 
-  // 활성 회사 바뀌면 SSE 재연결 (그 회사 변경을 구독) + ref 갱신.
+  // 활성 워크스페이스 바뀌면 SSE 재연결 (그 워크스페이스 변경을 구독) + ref 갱신.
   useEffect(() => {
-    activeCompanyRef.current = state.activeCompany
-    if (state.me && state.activeCompany) connectSse(state.activeCompany)
+    activeWorkspaceRef.current = state.activeWorkspace
+    if (state.me && state.activeWorkspace) connectSse(state.activeWorkspace)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeCompany])
+  }, [state.activeWorkspace])
 
   // 부팅 시 1회 업데이트 확인: 있으면 안내 (적용은 사용자 클릭). 실패는 무시.
   useEffect(() => {
@@ -272,20 +272,20 @@ function App() {
     }
   }
 
-  // opt-out 모델: 기본 전체 sync, 제외 목록에 있는 회사만 빠짐
-  function syncedCompanies(me: MeResponse, excluded: string[]): string[] {
+  // opt-out 모델: 기본 전체 sync, 제외 목록에 있는 워크스페이스만 빠짐
+  function syncedWorkspaces(me: MeResponse, excluded: string[]): string[] {
     return me.groups.filter((g) => !excluded.includes(g))
   }
 
   // -------------------------------------------------------------------------
-  // VFS: 로그인하면 자동: register → connect → 전 회사 placeholder 반영
+  // VFS: 로그인하면 자동: register → connect → 전 워크스페이스 placeholder 반영
   // -------------------------------------------------------------------------
 
   // 싱크는 전체 서브트리(모든 깊이)를 한 번에: recursive=true. (웹은 한 단계)
-  async function fetchTree(company: string, sc: Scope): Promise<NodeResponse[]> {
+  async function fetchTree(workspace: string, sc: Scope): Promise<NodeResponse[]> {
     const tree = await api<TreeResponse>(
       `/api/v1/nodes/tree?scope=${sc}&recursive=true`,
-      { companyId: company },
+      { workspaceId: workspace },
     )
     return tree.nodes
   }
@@ -315,7 +315,7 @@ function App() {
   // tree 평탄화 → vfs_populate payload. parent_id 사슬로 각 노드의 상대 경로 계산.
   function buildVfsPayload(
     nodes: NodeResponse[],
-    companyId: string,
+    workspaceId: string,
     skipIds: Set<string>,
     nameOf: NameOf,
     contentIds: Set<string>,
@@ -343,7 +343,7 @@ function App() {
         relativeDir: relDir(n),
         name: nameOf(n),
         nodeId: n.id,
-        companyId,
+        workspaceId,
         // vault 파일은 평문 크기(암호문-28: iv12+tag16) 로 placeholder 생성.
         // hydrate 가 복호화한 평문 길이와 일치해야 OS 가 잘림으로 보지 않음.
         size: contentIds.has(n.id)
@@ -389,23 +389,23 @@ function App() {
     }
   }
 
-  // path → node 역방향 인덱스 갱신 (F2 업로드용). 해당 company|scope 만 교체.
+  // path → node 역방향 인덱스 갱신 (F2 업로드용). 해당 workspace|scope 만 교체.
   function rebuildPathIndex(
-    company: string,
+    workspace: string,
     sc: Scope,
     nodes: NodeResponse[],
     baseDir: string,
     nameOf: NameOf,
   ) {
     for (const [k, v] of pathIndexRef.current) {
-      if (v.companyId === company && v.scope === sc) pathIndexRef.current.delete(k)
+      if (v.workspaceId === workspace && v.scope === sc) pathIndexRef.current.delete(k)
     }
     const pathOf = fullPathOf(nodes, baseDir, nameOf)
     for (const n of nodes) {
       pathIndexRef.current.set(normPath(pathOf(n)), {
         nodeId: n.id,
         etag: n.etag,
-        companyId: company,
+        workspaceId: workspace,
         scope: sc,
         kind: n.kind,
         // 변경 감지 기준값: 하이드레이트된 로컬 파일의 size/mtime 은 서버 값과
@@ -420,17 +420,17 @@ function App() {
   // prune=true 는 startup bootstrap 에서만: desired 강제 수렴은 재시작 시 1회.
   // polling/SSE sync 는 prune 생략(기존 diff 만): vault 안에서 막 만든 미업로드
   // 로컬 파일이 서버 반영 전에 prune 으로 날아가는 레이스 방지.
-  async function syncVfs(company: string, sc: Scope, nodes: NodeResponse[], prune = false) {
+  async function syncVfs(workspace: string, sc: Scope, nodes: NodeResponse[], prune = false) {
     const stg = await getSettings()
-    const key = `${company}|${sc}`
-    const baseDir = `${stg.syncRoot}\\${company}\\${scopeLabel(sc)}`
+    const key = `${workspace}|${sc}`
+    const baseDir = `${stg.syncRoot}\\${workspace}\\${scopeLabel(sc)}`
     // vault 내용 처리:
     //   잠금해제됨 → 이름 복호화해 구조 그대로 표시 (복호화 실패분만 skip)
     //   잠김       → 내용 통째 skip (vault 루트만 빈 채로)
     let vaultIds = new Set<string>()
     try {
       const vaults = await api<{ node_id: string }[]>("/api/v1/e2e/vaults", {
-        companyId: company,
+        workspaceId: workspace,
       })
       vaultIds = new Set(vaults.map((v) => v.node_id))
     } catch {
@@ -454,7 +454,7 @@ function App() {
       for (const n of nodes) {
         if (!contentIds.has(n.id)) continue
         const vroot = vaultRootOf(n)
-        const dec = vroot ? await e2e.decryptName(company, vroot, n.name) : null
+        const dec = vroot ? await e2e.decryptName(workspace, vroot, n.name) : null
         if (dec) nameOverrides.set(n.id, dec)
         else {
           skipIds.add(n.id) // 복호화 실패: 표시 불가
@@ -463,7 +463,7 @@ function App() {
         // 파일이면 DEK 도 풀어 Rust 에 넘길 준비 (폴더는 wrapped_dek 없음)
         const wrappedDek = (n as { wrapped_dek?: string | null }).wrapped_dek
         if (n.kind === "file" && vroot && wrappedDek) {
-          const raw = await e2e.exportDek(company, vroot, wrappedDek)
+          const raw = await e2e.exportDek(workspace, vroot, wrappedDek)
           if (raw) deks[n.id] = raw
         }
       }
@@ -510,7 +510,7 @@ function App() {
       }
     }
 
-    const { dirs, files } = buildVfsPayload(nodes, company, skipIds, nameOf, contentIds)
+    const { dirs, files } = buildVfsPayload(nodes, workspace, skipIds, nameOf, contentIds)
     await invoke<number>("vfs_populate", { baseDir, dirs, files })
 
     // vault 루트 로컬경로 기록: 암호화 업로드 디스패치(V5c)와 prune 공용.
@@ -519,7 +519,7 @@ function App() {
       const vnode = byId.get(vid)
       if (vnode) {
         vaultRootsRef.current.set(pathOf(vnode).toLowerCase(), {
-          company,
+          workspace,
           vaultNodeId: vid,
         })
       }
@@ -546,34 +546,34 @@ function App() {
     }
 
     vfsMapRef.current.set(key, { baseDir, entries: next })
-    rebuildPathIndex(company, sc, nodes, baseDir, nameOf)
+    rebuildPathIndex(workspace, sc, nodes, baseDir, nameOf)
   }
 
-  async function bootstrapCompany(company: string) {
+  async function bootstrapWorkspace(workspace: string) {
     for (const sc of SCOPES) {
       try {
-        const nodes = await fetchTree(company, sc)
-        await syncVfs(company, sc, nodes, true) // startup = prune 1회
+        const nodes = await fetchTree(workspace, sc)
+        await syncVfs(workspace, sc, nodes, true) // startup = prune 1회
       } catch (err) {
-        console.warn("[vfs] bootstrap", company, sc, err)
+        console.warn("[vfs] bootstrap", workspace, sc, err)
       }
     }
     // delta polling 의 baseline: 방금 전체 tree 를 반영했으니 지금부터 추적
-    if (!(await getLastSync(company))) {
-      await setLastSync(company, new Date().toISOString())
+    if (!(await getLastSync(workspace))) {
+      await setLastSync(workspace, new Date().toISOString())
     }
   }
 
-  // 전 회사 재동기화: E2E 잠금해제 직후 vault 이름을 복호화해 다시 깔기 위함.
+  // 전 워크스페이스 재동기화: E2E 잠금해제 직후 vault 이름을 복호화해 다시 깔기 위함.
   async function resyncAll() {
     if (!state.me) return
     const stg = await getSettings()
-    for (const company of syncedCompanies(state.me, stg.excludedCompanies)) {
+    for (const workspace of syncedWorkspaces(state.me, stg.excludedWorkspaces)) {
       for (const sc of SCOPES) {
         try {
-          await syncVfs(company, sc, await fetchTree(company, sc), true) // 잠금토글 = prune
+          await syncVfs(workspace, sc, await fetchTree(workspace, sc), true) // 잠금토글 = prune
         } catch (err) {
-          console.warn("[vfs] resync", company, sc, err)
+          console.warn("[vfs] resync", workspace, sc, err)
         }
       }
     }
@@ -611,7 +611,7 @@ function App() {
   // F2: 로컬 변경을 backend 로 업로드 (직렬 처리)
   // -------------------------------------------------------------------------
 
-  // 절대경로 → {company, scope, baseDir}. sync 대상 밖이면 null.
+  // 절대경로 → {workspace, scope, baseDir}. sync 대상 밖이면 null.
   async function parsePath(absPath: string) {
     const stg = await getSettings()
     const root = normPath(stg.syncRoot)
@@ -619,12 +619,12 @@ function App() {
     const rest = absPath.slice(stg.syncRoot.length).replace(/^\\+/, "")
     const segs = rest.split("\\")
     if (segs.length < 2) return null
-    const [company, scopeSeg] = segs
+    const [workspace, scopeSeg] = segs
     const scope: Scope | null =
-      scopeSeg === "내 파일" ? "personal" : scopeSeg === "회사 공유" ? "shared" : null
+      scopeSeg === "내 파일" ? "personal" : scopeSeg === "워크스페이스" ? "shared" : null
     if (!scope) return null
-    if (stg.excludedCompanies.includes(company)) return null
-    return { company, scope, baseDir: `${stg.syncRoot}\\${company}\\${scopeSeg}` }
+    if (stg.excludedWorkspaces.includes(workspace)) return null
+    return { workspace, scope, baseDir: `${stg.syncRoot}\\${workspace}\\${scopeSeg}` }
   }
 
   // 부모 폴더 절대경로 → parent_id (baseDir 직속이면 null)
@@ -633,14 +633,14 @@ function App() {
     return pathIndexRef.current.get(normPath(parentDir))?.nodeId ?? null
   }
 
-  function indexPut(path: string, e: { nodeId: string; etag: string | null; companyId: string; scope: Scope; kind: NodeKind; size?: number | null; mtimeMs?: number | null }) {
+  function indexPut(path: string, e: { nodeId: string; etag: string | null; workspaceId: string; scope: Scope; kind: NodeKind; size?: number | null; mtimeMs?: number | null }) {
     pathIndexRef.current.set(normPath(path), e)
   }
 
   // 업로드 후 vfsMapRef 의 etag/경로도 갱신: 다음 poll diff 가 같은 파일을
   // "원격 변경" 으로 오인해 로컬 파일을 placeholder 로 되돌리는 thrash 방지.
-  function syncEntryAfterUpload(company: string, sc: Scope, nodeId: string, path: string, etag: string | null) {
-    const m = vfsMapRef.current.get(`${company}|${sc}`)
+  function syncEntryAfterUpload(workspace: string, sc: Scope, nodeId: string, path: string, etag: string | null) {
+    const m = vfsMapRef.current.get(`${workspace}|${sc}`)
     if (m) m.entries.set(nodeId, { path, etag, kind: "file" })
   }
 
@@ -650,7 +650,7 @@ function App() {
     path: string,
     size: number,
     partSize: number,
-    company: string,
+    workspace: string,
   ): Promise<{ PartNumber: number; ETag: string }[]> {
     const count = Math.ceil(size / partSize)
     const parts: { PartNumber: number; ETag: string }[] = []
@@ -659,7 +659,7 @@ function App() {
       const length = Math.min(partSize, size - offset)
       const { url } = await api<{ url: string }>(
         `/api/v1/nodes/${nodeId}/parts/${i}/url`,
-        { method: "POST", companyId: company },
+        { method: "POST", workspaceId: workspace },
       )
       const etag = await invoke<string>("vfs_put_file_part", { path, url, offset, length })
       parts.push({ PartNumber: i, ETag: etag })
@@ -668,7 +668,7 @@ function App() {
     return parts
   }
 
-  async function uploadNewFile(path: string, ctx: { company: string; scope: Scope; baseDir: string }) {
+  async function uploadNewFile(path: string, ctx: { workspace: string; scope: Scope; baseDir: string }) {
     // 업로드한 로컬 size/mtime: 이후 modify 가 진짜 변경인지 판정하는 기준값.
     const st = await invoke<{ size: number; mtimeMs: number; dehydrated: boolean }>("vfs_file_stat", { path })
     const size = st.size
@@ -677,34 +677,34 @@ function App() {
       "/api/v1/nodes/upload-url",
       {
         method: "POST",
-        companyId: ctx.company,
+        workspaceId: ctx.workspace,
         body: { name: baseName(path), parent_id: parentId, size, scope: ctx.scope, mime: null },
       },
     )
     if (up.multipart && up.part_size) {
-      const parts = await uploadParts(up.node_id, path, size, up.part_size, ctx.company)
+      const parts = await uploadParts(up.node_id, path, size, up.part_size, ctx.workspace)
       const node = await api<NodeResponse>(`/api/v1/nodes/${up.node_id}/complete-multipart`, {
         method: "POST",
-        companyId: ctx.company,
+        workspaceId: ctx.workspace,
         body: { parts },
       })
-      indexPut(path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: "file", size: st.size, mtimeMs: st.mtimeMs })
-      syncEntryAfterUpload(ctx.company, ctx.scope, node.id, path, node.etag)
+      indexPut(path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: "file", size: st.size, mtimeMs: st.mtimeMs })
+      syncEntryAfterUpload(ctx.workspace, ctx.scope, node.id, path, node.etag)
       return
     }
     if (!up.upload_url) return
     await invoke("vfs_put_file", { path, url: up.upload_url })
     const node = await api<NodeResponse>(`/api/v1/nodes/${up.node_id}/complete`, {
       method: "POST",
-      companyId: ctx.company,
+      workspaceId: ctx.workspace,
     })
-    indexPut(path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: "file", size: st.size, mtimeMs: st.mtimeMs })
-    syncEntryAfterUpload(ctx.company, ctx.scope, node.id, path, node.etag)
+    indexPut(path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: "file", size: st.size, mtimeMs: st.mtimeMs })
+    syncEntryAfterUpload(ctx.workspace, ctx.scope, node.id, path, node.etag)
   }
 
   // 412 충돌: 로컬 버전을 "foo (충돌본 날짜 PC명).ext" 로 복사해 새 파일로 업로드.
   // 원본은 건드리지 않음: 다음 poll 이 서버 버전으로 되돌림.
-  async function handleConflict(path: string, ctx: { company: string; scope: Scope; baseDir: string }) {
+  async function handleConflict(path: string, ctx: { workspace: string; scope: Scope; baseDir: string }) {
     const date = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
     try {
       const conflictPath = await invoke<string>("vfs_make_conflict_copy", { path, date })
@@ -721,9 +721,9 @@ function App() {
   // 가 temp 로 암호화한 뒤 기존 업로드 머신(single/multipart)으로 그 temp 를 전송.
   async function uploadVaultFile(
     path: string,
-    ctx: { company: string; scope: Scope; baseDir: string },
-    vroot: { company: string; vaultNodeId: string },
-    entry: { nodeId: string; etag: string | null; companyId: string; scope: Scope; kind: NodeKind } | null,
+    ctx: { workspace: string; scope: Scope; baseDir: string },
+    vroot: { workspace: string; vaultNodeId: string },
+    entry: { nodeId: string; etag: string | null; workspaceId: string; scope: Scope; kind: NodeKind } | null,
   ) {
     // whole-file 암호화라 평문/암호문을 통째 메모리에 올림(~2배). 대용량은 메모리
     // 블로업 + 매 저장 전체 재업로드로 비효율 → 상한 초과 시 거부(편집은 웹/소형화 안내).
@@ -733,7 +733,7 @@ function App() {
       setPollStatus(`보안 폴더는 ${mb}MB 이하만: 너무 큼: ${baseName(path)}`)
       return
     }
-    const key = await e2e.makeUploadKey(ctx.company, vroot.vaultNodeId)
+    const key = await e2e.makeUploadKey(ctx.workspace, vroot.vaultNodeId)
     if (!key) {
       setPollStatus(`보안 폴더 키 없음: 업로드 보류: ${baseName(path)}`)
       return
@@ -748,7 +748,7 @@ function App() {
         try {
           ov = await api<{ upload_url?: string; multipart?: boolean; part_size?: number }>(`/api/v1/nodes/${entry.nodeId}/overwrite-url`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             ifMatch: entry.etag ?? undefined,
             body: { size: ctSize, mime: null, wrapped_dek: key.wrapped },
           })
@@ -763,10 +763,10 @@ function App() {
         }
         let node: NodeResponse
         if (ov.multipart && ov.part_size) {
-          const parts = await uploadParts(entry.nodeId, tempPath, ctSize, ov.part_size, ctx.company)
+          const parts = await uploadParts(entry.nodeId, tempPath, ctSize, ov.part_size, ctx.workspace)
           node = await api<NodeResponse>(`/api/v1/nodes/${entry.nodeId}/overwrite-complete`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: { parts },
           })
         } else {
@@ -774,25 +774,25 @@ function App() {
           await invoke("vfs_put_file", { path: tempPath, url: ov.upload_url })
           node = await api<NodeResponse>(`/api/v1/nodes/${entry.nodeId}/overwrite-complete`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: {},
           })
         }
         entry.etag = node.etag
-        syncEntryAfterUpload(ctx.company, ctx.scope, entry.nodeId, path, node.etag)
+        syncEntryAfterUpload(ctx.workspace, ctx.scope, entry.nodeId, path, node.etag)
         deksRef.current[entry.nodeId] = key.rawB64 // 즉시 재열기 위해 DEK 갱신
         await invoke("vfs_set_deks", { deks: deksRef.current })
         setPollStatus(`보안 업로드: ${baseName(path)}`)
       } else {
         // 신규 파일: 이름도 암호화해 전송. wrapped_dek 은 upload-url 본문에.
-        const encName = await e2e.encryptName(ctx.company, vroot.vaultNodeId, baseName(path))
+        const encName = await e2e.encryptName(ctx.workspace, vroot.vaultNodeId, baseName(path))
         if (!encName) return
         const parentId = resolveParentId(dirName(path), ctx.baseDir)
         const up = await api<{ node_id: string; upload_url?: string; multipart?: boolean; part_size?: number }>(
           "/api/v1/nodes/upload-url",
           {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: {
               name: encName,
               parent_id: parentId,
@@ -805,10 +805,10 @@ function App() {
         )
         let node: NodeResponse
         if (up.multipart && up.part_size) {
-          const parts = await uploadParts(up.node_id, tempPath, ctSize, up.part_size, ctx.company)
+          const parts = await uploadParts(up.node_id, tempPath, ctSize, up.part_size, ctx.workspace)
           node = await api<NodeResponse>(`/api/v1/nodes/${up.node_id}/complete-multipart`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: { parts },
           })
         } else {
@@ -816,12 +816,12 @@ function App() {
           await invoke("vfs_put_file", { path: tempPath, url: up.upload_url })
           node = await api<NodeResponse>(`/api/v1/nodes/${up.node_id}/complete`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: {},
           })
         }
-        indexPut(path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: "file" })
-        syncEntryAfterUpload(ctx.company, ctx.scope, node.id, path, node.etag)
+        indexPut(path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: "file" })
+        syncEntryAfterUpload(ctx.workspace, ctx.scope, node.id, path, node.etag)
         deksRef.current[node.id] = key.rawB64
         await invoke("vfs_set_deks", { deks: deksRef.current })
         setPollStatus(`보안 업로드(신규): ${baseName(path)}`)
@@ -839,7 +839,7 @@ function App() {
   // vault 소속 로컬 변경 처리 (V5c): 내용/이름을 암호화해 반영.
   async function processVaultChange(
     change: LocalChange,
-    vroot: { company: string; vaultNodeId: string },
+    vroot: { workspace: string; vaultNodeId: string },
   ) {
     const ctx = await parsePath(change.path)
     if (!ctx) return
@@ -850,15 +850,15 @@ function App() {
 
     if (change.kind === "create") {
       if (change.isDir) {
-        const encName = await e2e.encryptName(ctx.company, vroot.vaultNodeId, baseName(change.path))
+        const encName = await e2e.encryptName(ctx.workspace, vroot.vaultNodeId, baseName(change.path))
         if (!encName) return
         const parentId = resolveParentId(dirName(change.path), ctx.baseDir)
         const node = await api<NodeResponse>("/api/v1/nodes", {
           method: "POST",
-          companyId: ctx.company,
+          workspaceId: ctx.workspace,
           body: { name: encName, parent_id: parentId, scope: ctx.scope },
         })
-        indexPut(change.path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: "folder" })
+        indexPut(change.path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: "folder" })
         return
       }
       await uploadVaultFile(change.path, ctx, vroot, null)
@@ -875,9 +875,9 @@ function App() {
     if (change.kind === "delete") {
       const entry = pathIndexRef.current.get(normPath(change.path))
       if (!entry) return
-      await api(`/api/v1/nodes/${entry.nodeId}`, { method: "DELETE", companyId: ctx.company })
+      await api(`/api/v1/nodes/${entry.nodeId}`, { method: "DELETE", workspaceId: ctx.workspace })
       pathIndexRef.current.delete(normPath(change.path))
-      vfsMapRef.current.get(`${ctx.company}|${ctx.scope}`)?.entries.delete(entry.nodeId)
+      vfsMapRef.current.get(`${ctx.workspace}|${ctx.scope}`)?.entries.delete(entry.nodeId)
       delete deksRef.current[entry.nodeId]
       return
     }
@@ -892,22 +892,22 @@ function App() {
       }
       const entry = pathIndexRef.current.get(normPath(change.oldPath))
       if (!entry) return
-      const encName = await e2e.encryptName(ctx.company, vroot.vaultNodeId, baseName(change.path))
+      const encName = await e2e.encryptName(ctx.workspace, vroot.vaultNodeId, baseName(change.path))
       if (!encName) return
       const newParentId = resolveParentId(dirName(change.path), ctx.baseDir)
       const node = await api<NodeResponse>(`/api/v1/nodes/${entry.nodeId}`, {
         method: "PATCH",
-        companyId: ctx.company,
+        workspaceId: ctx.workspace,
         body: { name: encName, parent_id: newParentId },
       })
       pathIndexRef.current.delete(normPath(change.oldPath))
-      indexPut(change.path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: entry.kind })
-      syncEntryAfterUpload(ctx.company, ctx.scope, entry.nodeId, change.path, node.etag)
+      indexPut(change.path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: entry.kind })
+      syncEntryAfterUpload(ctx.workspace, ctx.scope, entry.nodeId, change.path, node.etag)
     }
   }
 
-  // 경로가 어느 vault 소속인지: 매칭되면 {회사, vault 노드}. 아니면 null.
-  function vaultRootFor(p: string | null | undefined): { company: string; vaultNodeId: string } | null {
+  // 경로가 어느 vault 소속인지: 매칭되면 {워크스페이스, vault 노드}. 아니면 null.
+  function vaultRootFor(p: string | null | undefined): { workspace: string; vaultNodeId: string } | null {
     if (!p) return null
     const lower = p.toLowerCase()
     for (const [root, info] of vaultRootsRef.current) {
@@ -934,10 +934,10 @@ function App() {
         const parentId = resolveParentId(dirName(change.path), ctx.baseDir)
         const node = await api<NodeResponse>("/api/v1/nodes", {
           method: "POST",
-          companyId: ctx.company,
+          workspaceId: ctx.workspace,
           body: { name: baseName(change.path), parent_id: parentId, scope: ctx.scope },
         })
-        indexPut(change.path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: "folder" })
+        indexPut(change.path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: "folder" })
         return
       }
       await uploadNewFile(change.path, ctx)
@@ -981,14 +981,14 @@ function App() {
       try {
         const ov = await api<{ upload_url?: string; multipart?: boolean; part_size?: number }>(
           `/api/v1/nodes/${entry.nodeId}/overwrite-url`,
-          { method: "POST", companyId: ctx.company, ifMatch: entry.etag ?? undefined, body: { size, mime: null } },
+          { method: "POST", workspaceId: ctx.workspace, ifMatch: entry.etag ?? undefined, body: { size, mime: null } },
         )
         let node: NodeResponse
         if (ov.multipart && ov.part_size) {
-          const parts = await uploadParts(entry.nodeId, change.path, size, ov.part_size, ctx.company)
+          const parts = await uploadParts(entry.nodeId, change.path, size, ov.part_size, ctx.workspace)
           node = await api<NodeResponse>(`/api/v1/nodes/${entry.nodeId}/overwrite-complete`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: { parts },
           })
         } else {
@@ -996,14 +996,14 @@ function App() {
           await invoke("vfs_put_file", { path: change.path, url: ov.upload_url })
           node = await api<NodeResponse>(`/api/v1/nodes/${entry.nodeId}/overwrite-complete`, {
             method: "POST",
-            companyId: ctx.company,
+            workspaceId: ctx.workspace,
             body: {},
           })
         }
         entry.etag = node.etag
         entry.size = st.size // 업로드한 로컬 기준값 갱신: 다음 헛 modify 는 skip
         entry.mtimeMs = st.mtimeMs
-        syncEntryAfterUpload(ctx.company, ctx.scope, entry.nodeId, change.path, node.etag)
+        syncEntryAfterUpload(ctx.workspace, ctx.scope, entry.nodeId, change.path, node.etag)
         setPollStatus(`업로드 반영: ${baseName(change.path)} (${node.size_bytes}B)`)
       } catch (err) {
         if (err instanceof ApiError && err.status === 412) {
@@ -1021,9 +1021,9 @@ function App() {
     if (change.kind === "delete") {
       const entry = pathIndexRef.current.get(normPath(change.path))
       if (!entry) return
-      await api(`/api/v1/nodes/${entry.nodeId}`, { method: "DELETE", companyId: ctx.company })
+      await api(`/api/v1/nodes/${entry.nodeId}`, { method: "DELETE", workspaceId: ctx.workspace })
       pathIndexRef.current.delete(normPath(change.path))
-      vfsMapRef.current.get(`${ctx.company}|${ctx.scope}`)?.entries.delete(entry.nodeId)
+      vfsMapRef.current.get(`${ctx.workspace}|${ctx.scope}`)?.entries.delete(entry.nodeId)
       return
     }
 
@@ -1033,12 +1033,12 @@ function App() {
       const newParentId = resolveParentId(dirName(change.path), ctx.baseDir)
       const node = await api<NodeResponse>(`/api/v1/nodes/${entry.nodeId}`, {
         method: "PATCH",
-        companyId: ctx.company,
+        workspaceId: ctx.workspace,
         body: { name: baseName(change.path), parent_id: newParentId },
       })
       pathIndexRef.current.delete(normPath(change.oldPath))
-      indexPut(change.path, { nodeId: node.id, etag: node.etag, companyId: ctx.company, scope: ctx.scope, kind: entry.kind })
-      syncEntryAfterUpload(ctx.company, ctx.scope, entry.nodeId, change.path, node.etag)
+      indexPut(change.path, { nodeId: node.id, etag: node.etag, workspaceId: ctx.workspace, scope: ctx.scope, kind: entry.kind })
+      syncEntryAfterUpload(ctx.workspace, ctx.scope, entry.nodeId, change.path, node.etag)
     }
   }
 
@@ -1081,8 +1081,8 @@ function App() {
     } catch (err) {
       console.warn("[vfs] connect", err)
     }
-    for (const company of syncedCompanies(me, stg.excludedCompanies)) {
-      await bootstrapCompany(company)
+    for (const workspace of syncedWorkspaces(me, stg.excludedWorkspaces)) {
+      await bootstrapWorkspace(workspace)
     }
     // 로컬 변경 감지 시작: placeholder 다 깔린 뒤라야 초기 create 폭주를 피함
     try {
@@ -1090,25 +1090,25 @@ function App() {
     } catch (err) {
       console.warn("[watcher] start", err)
     }
-    // SSE 실시간 nudge 시작 (활성/첫 회사 기준). polling 은 fallback 으로 유지.
-    connectSse(syncedCompanies(me, stg.excludedCompanies)[0] ?? null)
+    // SSE 실시간 nudge 시작 (활성/첫 워크스페이스 기준). polling 은 fallback 으로 유지.
+    connectSse(syncedWorkspaces(me, stg.excludedWorkspaces)[0] ?? null)
     setPollStatus(`탐색기 동기화 준비 완료 · ${new Date().toLocaleTimeString()}`)
   }
 
-  // SSE 연결: 활성 회사의 node 변경 nudge 구독. 토큰은 현재 access_token.
-  // 회사/토큰 바뀌면 재호출: Rust 쪽이 세대 카운터로 옛 연결 정리.
-  function connectSse(company: string | null) {
+  // SSE 연결: 활성 워크스페이스의 node 변경 nudge 구독. 토큰은 현재 access_token.
+  // 워크스페이스/토큰 바뀌면 재호출: Rust 쪽이 세대 카운터로 옛 연결 정리.
+  function connectSse(workspace: string | null) {
     const token = getToken()
-    if (!company || !token) return
+    if (!workspace || !token) return
     void invoke("sse_connect", {
       url: `${env.apiUrl}/api/v1/nodes/events`,
       token,
-      company,
+      workspace,
     }).catch((err) => console.warn("[sse] connect", err))
   }
 
   // -------------------------------------------------------------------------
-  // Delta polling: 1분 주기, sync 대상 전 회사 순회 (ADR-0015 결정 7)
+  // Delta polling: 1분 주기, sync 대상 전 워크스페이스 순회 (ADR-0015 결정 7)
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!state.me) return
@@ -1117,27 +1117,27 @@ function App() {
     async function pollAll() {
       const stg = await getSettings()
       let applied = 0
-      for (const company of syncedCompanies(me, stg.excludedCompanies)) {
+      for (const workspace of syncedWorkspaces(me, stg.excludedWorkspaces)) {
         try {
-          const since = await getLastSync(company)
+          const since = await getLastSync(workspace)
           if (!since) {
-            await setLastSync(company, new Date().toISOString())
+            await setLastSync(workspace, new Date().toISOString())
             continue
           }
           const res = await api<ChangesResponse>(
             `/api/v1/nodes/changes?since=${encodeURIComponent(since)}`,
-            { companyId: company },
+            { workspaceId: workspace },
           )
           if (res.changes.length > 0) {
             for (const sc of SCOPES) {
-              const nodes = await fetchTree(company, sc)
-              await syncVfs(company, sc, nodes)
+              const nodes = await fetchTree(workspace, sc)
+              await syncVfs(workspace, sc, nodes)
             }
             applied += res.changes.length
           }
-          await setLastSync(company, res.server_time)
+          await setLastSync(workspace, res.server_time)
         } catch (err) {
-          console.warn("[poll]", company, err)
+          console.warn("[poll]", workspace, err)
         }
       }
       setPollStatus(
@@ -1165,12 +1165,12 @@ function App() {
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
       const me = await api<MeResponse>("/api/v1/me")
-      const excluded = (await getSettings()).excludedCompanies
-      const initialCompany = syncedCompanies(me, excluded)[0] ?? null
-      if (initialCompany) setActiveCompany(initialCompany)
+      const excluded = (await getSettings()).excludedWorkspaces
+      const initialWorkspace = syncedWorkspaces(me, excluded)[0] ?? null
+      if (initialWorkspace) setActiveWorkspace(initialWorkspace)
       setState({
         me,
-        activeCompany: initialCompany,
+        activeWorkspace: initialWorkspace,
         nodes: [],
         loading: false,
         error: null,
@@ -1180,7 +1180,7 @@ function App() {
       // 401 = 자동 refresh 까지 실패 (revoked / SSO 종료): 세션 만료, 로그인 화면으로
       if (err instanceof ApiError && err.status === 401) {
         setToken(null)
-        setActiveCompany(null)
+        setActiveWorkspace(null)
         setState({ ...INITIAL_STATE, error: "세션이 만료되었습니다. 다시 로그인해주세요." })
         return null
       }
@@ -1209,7 +1209,7 @@ function App() {
     }
   }
 
-  // 온보딩: 폴더만 확인하고 동기화 시작 (opt-out 이라 회사 선택 안 물음)
+  // 온보딩: 폴더만 확인하고 동기화 시작 (opt-out 이라 워크스페이스 선택 안 물음)
   async function handleOnboardingFolder() {
     const picked = await openDialog({
       directory: true,
@@ -1260,7 +1260,7 @@ function App() {
     }
     setE2eUnlocked(false)
     setToken(null)
-    setActiveCompany(null)
+    setActiveWorkspace(null)
     setState(INITIAL_STATE)
   }
 
@@ -1290,7 +1290,7 @@ function App() {
     vfsMapRef.current.clear()
     pathIndexRef.current.clear()
     setToken(null)
-    setActiveCompany(null)
+    setActiveWorkspace(null)
     setState(INITIAL_STATE)
   }
 
@@ -1319,33 +1319,33 @@ function App() {
     void bootstrapVfs(state.me)
   }
 
-  async function handleToggleExclude(companyId: string) {
+  async function handleToggleExclude(workspaceId: string) {
     if (!settings || !state.me) return
-    const turningOff = !settings.excludedCompanies.includes(companyId)
+    const turningOff = !settings.excludedWorkspaces.includes(workspaceId)
     const excluded = turningOff
-      ? [...settings.excludedCompanies, companyId]
-      : settings.excludedCompanies.filter((c) => c !== companyId)
-    await setExcludedCompanies(excluded)
-    setSettings({ ...settings, excludedCompanies: excluded })
+      ? [...settings.excludedWorkspaces, workspaceId]
+      : settings.excludedWorkspaces.filter((c) => c !== workspaceId)
+    await setExcludedWorkspaces(excluded)
+    setSettings({ ...settings, excludedWorkspaces: excluded })
 
     if (turningOff) {
-      // 제외: 탐색기에서 회사 폴더 정리 (서버 원본은 그대로)
+      // 제외: 탐색기에서 워크스페이스 폴더 정리 (서버 원본은 그대로)
       try {
-        await invoke("vfs_remove_dir", { path: `${settings.syncRoot}\\${companyId}` })
+        await invoke("vfs_remove_dir", { path: `${settings.syncRoot}\\${workspaceId}` })
       } catch (err) {
         console.warn("[vfs] remove dir", err)
       }
-      for (const sc of SCOPES) vfsMapRef.current.delete(`${companyId}|${sc}`)
+      for (const sc of SCOPES) vfsMapRef.current.delete(`${workspaceId}|${sc}`)
 
-      // 활성 회사가 방금 제외됐으면 남은 회사 중 첫 번째로 전환
-      if (state.activeCompany === companyId) {
-        const next = syncedCompanies(state.me, excluded)[0] ?? null
-        setState((s) => ({ ...s, activeCompany: next, nodes: [] }))
-        if (next) setActiveCompany(next) // SSE/API 컨텍스트만 갱신
+      // 활성 워크스페이스가 방금 제외됐으면 남은 워크스페이스 중 첫 번째로 전환
+      if (state.activeWorkspace === workspaceId) {
+        const next = syncedWorkspaces(state.me, excluded)[0] ?? null
+        setState((s) => ({ ...s, activeWorkspace: next, nodes: [] }))
+        if (next) setActiveWorkspace(next) // SSE/API 컨텍스트만 갱신
       }
     } else {
-      // 다시 포함: 그 회사만 placeholder 재구축
-      void bootstrapCompany(companyId)
+      // 다시 포함: 그 워크스페이스만 placeholder 재구축
+      void bootstrapWorkspace(workspaceId)
     }
   }
 
@@ -1470,10 +1470,10 @@ function App() {
             </div>
           </div>
           <div>
-            <strong>회사별 동기화</strong>
+            <strong>워크스페이스별 동기화</strong>
             <div style={{ marginTop: "6px" }}>
             {state.me.groups.map((c) => {
-              const excluded = settings.excludedCompanies.includes(c)
+              const excluded = settings.excludedWorkspaces.includes(c)
               return (
                 <label key={c} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "2px 0", opacity: excluded ? 0.5 : 1 }}>
                   <input
