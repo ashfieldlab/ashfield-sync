@@ -20,6 +20,9 @@ minisign 으로 검증됨.
 # private 키를 환경변수로 (빈 패스워드)
 export TAURI_SIGNING_PRIVATE_KEY="$(cat .updater-keys/ashfield-sync.key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+# 서버 주소 기본값 비우기 + 바이너리에 박히는 소스 경로에서 홈 디렉터리(사용자 이름) 제거
+export VITE_DRIVE_URL=""
+export RUSTFLAGS="--remap-path-prefix=$HOME=/build"
 
 npm run tauri build
 ```
