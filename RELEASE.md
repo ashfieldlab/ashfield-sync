@@ -27,6 +27,9 @@ npm run tauri build
 `createUpdaterArtifacts: true` 라 빌드 산출물에 설치 파일(`.msi` / `-setup.exe`)과
 각각의 `.sig` 가 생성됨 (`src-tauri/target/release/bundle/`).
 
+Linux 는 Linux 에서 빌드: `.deb`, `.rpm`, `.AppImage` 가 나온다. 자동 업데이트는
+AppImage 만 지원 (`.AppImage.sig`). deb/rpm 설치본은 새 패키지를 직접 설치.
+
 ## 로그인 설정 (빌드 시 고정)
 
 로그인은 Ashfield 계정 서버(OIDC)로 한다: Keycloak 아님. 계약:
@@ -58,6 +61,10 @@ npm run tauri build
        "windows-x86_64": {
          "signature": "<-setup.exe.sig 내용>",
          "url": "https://github.com/ashfieldlab/ashfield-sync/releases/download/v0.2.0/Ashfield.Sync_0.2.0_x64-setup.exe"
+       },
+       "linux-x86_64": {
+         "signature": "<.AppImage.sig 내용>",
+         "url": "https://github.com/ashfieldlab/ashfield-sync/releases/download/v0.2.0/Ashfield.Sync_0.2.0_amd64.AppImage"
        }
      }
    }

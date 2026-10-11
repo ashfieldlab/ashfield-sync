@@ -30,10 +30,6 @@ tauri-plugin-shell = "2.3.5"
 tauri-plugin-store = "2.4.3"
 tauri-plugin-http = "2"
 
-# OAuth (PKCE): Ashfield 계정 서버(OIDC) 연동
-# keyring v3 는 platform feature 미명시 시 mock(in-memory) 저장소로 fallback.
-# 재시작하면 token 증발. windows-native 명시 필수.
-keyring = { version = "3", features = ["windows-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking", "stream"] }
 rand = "0.8"
 base64 = "0.22"
@@ -45,10 +41,25 @@ urlencoding = "2"
 webbrowser = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net"] }
-# 로컬 변경 감지 (F1): Windows 에선 ReadDirectoryChangesW 를 감쌈
+# 로컬 변경 감지 (F1): Windows 는 ReadDirectoryChangesW, Linux 는 inotify
 notify = "6"
 notify-debouncer-full = "0.3"
 futures-util = "0.3"
+
+# OAuth (PKCE) refresh token 저장. keyring v3 는 platform feature 미명시 시
+# mock(in-memory) 저장소로 fallback (재시작하면 token 증발): OS 별 명시 필수.
+[target.'cfg(windows)'.dependencies.keyring]
+version = "3"
+features = ["windows-native"]
+
+# Linux: Secret Service (GNOME Keyring, KWallet) over D-Bus
+[target.'cfg(target_os = "linux")'.dependencies.keyring]
+version = "3"
+features = ["sync-secret-service", "crypto-rust"]
+
+[target.'cfg(target_os = "macos")'.dependencies.keyring]
+version = "3"
+features = ["apple-native"]
 
 # Cloud Files API (Files On-Demand VFS): Windows 전용
 [target.'cfg(windows)'.dependencies]

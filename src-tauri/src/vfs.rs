@@ -1,10 +1,8 @@
-//! Windows Cloud Files API (Files On-Demand VFS).
+//! 로컬 sync 폴더 반영.
 //!
-//! E1: sync root 등록/해제: 폴더를 OS 의 "cloud provider 영역" 으로.
-//! E2+: placeholder 생성, hydration callback (후속 chunk).
-//!
-//! Windows 전용: 다른 OS 에선 stub 이 명시적 에러 반환.
-//! 참고: Microsoft CloudMirror sample + ADR-0015.
+//! Windows: Cloud Files API (Files On-Demand). sync root 등록, placeholder 생성,
+//! 첫 접근 시 hydration callback 이 내용을 받는다. 참고: CloudMirror sample + ADR-0015.
+//! Linux: 같은 명령을 전체 미러로 구현 (populate 가 파일을 바로 내려받음).
 
 use serde::Deserialize;
 
@@ -19,6 +17,8 @@ pub struct PlaceholderFile {
     pub node_id: String,
     /// 워크스페이스 ID: download-url 호출의 X-Active-Workspace-Id (FileIdentity 에 함께 인코딩)
     pub workspace_id: String,
+    // placeholder 크기: Linux 는 실제 파일을 받으므로 안 씀
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub size: i64,
     /// epoch millis (UTC): updated_at
     pub mtime_ms: i64,
@@ -31,9 +31,153 @@ pub struct ConnectConfig {
     pub api_url: String,
 }
 
+// ---------------------------------------------------------------------
+// 내용 다운로드 (플랫폼 공용): Windows 는 hydration callback 에서, Linux 는
+// populate 의 다운로드 큐에서 부른다. access_token 은 oauth 모듈의 공용 캐시에서
+// 받는다 (refresh_token 회전: VFS 가 따로 refresh 하면 JS/SSE 와 경쟁해 패밀리가 폐기된다).
+// ---------------------------------------------------------------------
+
+static CONFIG: std::sync::OnceLock<ConnectConfig> = std::sync::OnceLock::new();
+
+fn set_config(config: ConnectConfig) {
+    let _ = CONFIG.set(config);
+}
+
+// E2E vault 파일 복호화용 DEK (ADR-0016 V5b). node_id → raw 32B AES-256 키.
+// JS 가 잠금해제 시 wrapped_dek 을 풀어 raw 로 밀어넣음(vfs_set_deks). 잠김/
+// 로그아웃 시 비움. 다운로드 스레드는 JS 를 await 할 수 없으므로 사전 적재 필수.
+// 키 존재 = 그 파일은 복호화 대상.
+static DEKS: std::sync::Mutex<Option<std::collections::HashMap<String, Vec<u8>>>> =
+    std::sync::Mutex::new(None);
+
+fn set_deks(map: std::collections::HashMap<String, Vec<u8>>) {
+    *DEKS.lock().unwrap() = Some(map);
+}
+
+fn dek_for(node_id: &str) -> Option<Vec<u8>> {
+    DEKS.lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|m| m.get(node_id).cloned())
+}
+
+/// whole-file AES-256-GCM 복호화. 입력 = [iv(12)][ciphertext][tag(16)]
+/// (웹 crypto.ts aesEncrypt 출력의 raw 바이트). 출력 = 평문.
+fn aes_gcm_decrypt(dek: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+    if dek.len() != 32 {
+        return Err(format!("DEK 길이 오류: {}", dek.len()));
+    }
+    if data.len() < 12 + 16 {
+        return Err(format!("암호문 너무 짧음: {}B", data.len()));
+    }
+    let key = Key::<Aes256Gcm>::from_slice(dek);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Nonce::from_slice(&data[..12]); // iv
+    // data[12..] = ciphertext || tag: aes-gcm 의 detached-less decrypt 입력
+    cipher
+        .decrypt(nonce, &data[12..])
+        .map_err(|_| "AES-GCM 복호화 실패 (tag 불일치: 키/내용 무결성)".to_string())
+}
+
+#[derive(Deserialize)]
+struct DownloadUrlRes {
+    url: String,
+}
+
+/// 노드 내용을 받아 1MB 단위로 sink(buf, offset) 에 넘긴다 (blocking: worker 스레드 전용).
+/// dek 가 있으면(vault 파일) 복호화한 평문을 넘긴다. 0바이트면 sink(&[], 0) 를 한 번 부른다.
+fn fetch_content(
+    workspace: &str,
+    node_id: &str,
+    dek: Option<&[u8]>,
+    mut sink: impl FnMut(&[u8], i64) -> Result<(), String>,
+) -> Result<(), String> {
+    let config = CONFIG.get().ok_or("vfs_connect 안 됨")?;
+    let client = reqwest::blocking::Client::new();
+
+    // 1. presigned URL: 401 이면 토큰 갱신 후 한 번 재시도
+    let download_url = |token: &str| {
+        client
+            .post(format!(
+                "{}/api/v1/nodes/{}/download-url",
+                config.api_url, node_id
+            ))
+            .bearer_auth(token)
+            .header("X-Active-Workspace-Id", urlencoding::encode(workspace).as_ref())
+            .send()
+            .map_err(|e| format!("download-url POST: {e}"))
+    };
+    let token = crate::oauth::access_token_blocking(None)?;
+    let mut res = download_url(&token)?;
+    if res.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let token = crate::oauth::access_token_blocking(Some(&token))?;
+        res = download_url(&token)?;
+    }
+    if !res.status().is_success() {
+        return Err(format!("download-url {}", res.status()));
+    }
+    let dl: DownloadUrlRes = res.json().map_err(|e| format!("parse: {e}"))?;
+
+    // 2. S3 GET
+    let mut resp = client
+        .get(&dl.url)
+        .send()
+        .map_err(|e| format!("S3 GET: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("S3 {}", resp.status()));
+    }
+
+    const CHUNK: usize = 1024 * 1024; // 4KB 정렬 배수 필수 (CfExecute, 마지막 chunk 제외)
+
+    // 2-E. E2E vault 파일: whole-file AES-GCM 은 부분 복호화 불가.
+    // 전체 암호문을 메모리에 받아 한 번에 복호화 후, 평문을 1MB 단위 전달.
+    // placeholder FileSize 는 평문 크기(size_bytes-28)로 만들어 둠 → 길이 일치.
+    if let Some(dek) = dek {
+        let body = resp.bytes().map_err(|e| format!("S3 body: {e}"))?;
+        let plain = aes_gcm_decrypt(dek, &body)?;
+        if plain.is_empty() {
+            return sink(&[], 0);
+        }
+        for (i, chunk) in plain.chunks(CHUNK).enumerate() {
+            sink(chunk, (i * CHUNK) as i64)?;
+        }
+        return Ok(());
+    }
+
+    // 2-N. 일반(비암호화) 파일: 스트리밍 1MB 단위
+    use std::io::Read;
+    let mut buf = vec![0u8; CHUNK];
+    let mut filled = 0usize;
+    let mut offset: i64 = 0;
+    loop {
+        let n = resp
+            .read(&mut buf[filled..])
+            .map_err(|e| format!("read: {e}"))?;
+        if n == 0 {
+            if filled > 0 {
+                sink(&buf[..filled], offset)?;
+            } else if offset == 0 {
+                // 0바이트 파일: 아무것도 안 넘기면 Windows placeholder 가
+                // dehydrated 로 남는다. 빈 전송으로 완료 통지.
+                sink(&[], 0)?;
+            }
+            break;
+        }
+        filled += n;
+        if filled == CHUNK {
+            sink(&buf, offset)?;
+            offset += CHUNK as i64;
+            filled = 0;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 mod imp {
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
 
     use windows::core::{GUID, HSTRING, PCWSTR};
     use windows::Win32::Foundation::{STATUS_SUCCESS, STATUS_UNSUCCESSFUL};
@@ -53,64 +197,7 @@ mod imp {
 
     use super::{ConnectConfig, PlaceholderFile};
 
-    // ---------------------------------------------------------------------
-    // Hydration 컨텍스트: callback (OS 스레드) 이 backend 호출에 필요한 것들.
-    // OnceLock: 첫 connect 시 설정. access_token 은 oauth 모듈의 공용 캐시에서 받는다
-    // (refresh_token 회전: VFS 가 따로 refresh 하면 JS/SSE 와 경쟁해 패밀리가 폐기된다).
-    // ---------------------------------------------------------------------
-    struct HydrationCtx {
-        config: ConnectConfig,
-    }
-
-    static CTX: OnceLock<HydrationCtx> = OnceLock::new();
     static CONNECTION: Mutex<Option<i64>> = Mutex::new(None);
-
-    // E2E vault 파일 복호화용 DEK (ADR-0016 V5b). node_id → raw 32B AES-256 키.
-    // JS 가 잠금해제 시 wrapped_dek 을 풀어 raw 로 밀어넣음(vfs_set_deks). 잠김/
-    // 로그아웃 시 비움. hydrate 콜백(OS 스레드)은 JS 를 await 할 수 없으므로 사전
-    // 적재 필수. 키 존재 = 그 파일은 복호화 대상.
-    static DEKS: Mutex<Option<std::collections::HashMap<String, Vec<u8>>>> = Mutex::new(None);
-
-    pub fn set_deks(map: std::collections::HashMap<String, Vec<u8>>) {
-        *DEKS.lock().unwrap() = Some(map);
-    }
-
-    fn dek_for(node_id: &str) -> Option<Vec<u8>> {
-        DEKS.lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|m| m.get(node_id).cloned())
-    }
-
-    /// whole-file AES-256-GCM 복호화. 입력 = [iv(12)][ciphertext][tag(16)]
-    /// (웹 crypto.ts aesEncrypt 출력의 raw 바이트). 출력 = 평문.
-    fn aes_gcm_decrypt(dek: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
-        use aes_gcm::aead::{Aead, KeyInit};
-        use aes_gcm::{Aes256Gcm, Key, Nonce};
-        if dek.len() != 32 {
-            return Err(format!("DEK 길이 오류: {}", dek.len()));
-        }
-        if data.len() < 12 + 16 {
-            return Err(format!("암호문 너무 짧음: {}B", data.len()));
-        }
-        let key = Key::<Aes256Gcm>::from_slice(dek);
-        let cipher = Aes256Gcm::new(key);
-        let nonce = Nonce::from_slice(&data[..12]); // iv
-        // data[12..] = ciphertext || tag: aes-gcm 의 detached-less decrypt 입력
-        cipher
-            .decrypt(nonce, &data[12..])
-            .map_err(|_| "AES-GCM 복호화 실패 (tag 불일치: 키/내용 무결성)".to_string())
-    }
-
-    #[derive(serde::Deserialize)]
-    struct DownloadUrlRes {
-        url: String,
-    }
-
-    /// 유효한 access token (blocking: worker 스레드 전용). refresh 는 oauth 모듈이 직렬화.
-    fn get_access_token(stale: Option<&str>) -> Result<String, String> {
-        crate::oauth::access_token_blocking(stale)
-    }
 
     // ---------------------------------------------------------------------
     // FETCH_DATA callback: OS 가 placeholder 첫 접근 시 호출.
@@ -238,101 +325,14 @@ mod imp {
         request_key: i64,
         _file_size: i64,
     ) -> Result<(), String> {
-        let ctx = CTX.get().ok_or("vfs_connect 안 됨")?;
         let identity = String::from_utf8(identity).map_err(|_| "identity utf8 아님")?;
         let (workspace, node_id) = identity
             .split_once('\n')
             .ok_or("identity 형식 오류 (재 populate 필요: 옛 placeholder)")?;
-
-        let client = reqwest::blocking::Client::new();
-
-        // 1. presigned URL: 401 이면 토큰 갱신 후 한 번 재시도
-        let download_url = |token: &str| {
-            client
-                .post(format!(
-                    "{}/api/v1/nodes/{}/download-url",
-                    ctx.config.api_url, node_id
-                ))
-                .bearer_auth(token)
-                .header("X-Active-Workspace-Id", urlencoding::encode(workspace).as_ref())
-                .send()
-                .map_err(|e| format!("download-url POST: {e}"))
-        };
-        let token = get_access_token(None)?;
-        let mut res = download_url(&token)?;
-        if res.status() == reqwest::StatusCode::UNAUTHORIZED {
-            let token = get_access_token(Some(&token))?;
-            res = download_url(&token)?;
-        }
-        if !res.status().is_success() {
-            return Err(format!("download-url {}", res.status()));
-        }
-        let dl: DownloadUrlRes = res.json().map_err(|e| format!("parse: {e}"))?;
-
-        // 2. S3 GET
-        let mut resp = client
-            .get(&dl.url)
-            .send()
-            .map_err(|e| format!("S3 GET: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("S3 {}", resp.status()));
-        }
-
-        const CHUNK: usize = 1024 * 1024; // 4KB 정렬 배수 필수 (마지막 chunk 제외)
-
-        // 2-E. E2E vault 파일: whole-file AES-GCM 은 부분 복호화 불가.
-        // 전체 암호문을 메모리에 받아 한 번에 복호화 후, 평문을 1MB 단위 전달.
-        // placeholder FileSize 는 평문 크기(size_bytes-28)로 만들어 둠 → 길이 일치.
-        if let Some(dek) = dek_for(node_id) {
-            let body = resp.bytes().map_err(|e| format!("S3 body: {e}"))?;
-            let plain = aes_gcm_decrypt(&dek, &body)?;
-            let mut offset = 0usize;
-            if plain.is_empty() {
-                // 0바이트 평문: 빈 전송으로 완료 통지
-                transfer_chunk(connection_key, transfer_key, request_key, &[], 0, true)?;
-            }
-            while offset < plain.len() {
-                let end = (offset + CHUNK).min(plain.len());
-                transfer_chunk(
-                    connection_key,
-                    transfer_key,
-                    request_key,
-                    &plain[offset..end],
-                    offset as i64,
-                    true,
-                )?;
-                offset = end;
-            }
-            return Ok(());
-        }
-
-        // 2-N. 일반(비암호화) 파일: 스트리밍 1MB 단위 CfExecute
-        use std::io::Read;
-        let mut buf = vec![0u8; CHUNK];
-        let mut filled = 0usize;
-        let mut offset: i64 = 0;
-        loop {
-            let n = resp
-                .read(&mut buf[filled..])
-                .map_err(|e| format!("read: {e}"))?;
-            if n == 0 {
-                if filled > 0 {
-                    transfer_chunk(connection_key, transfer_key, request_key, &buf[..filled], offset, true)?;
-                } else if offset == 0 {
-                    // 0바이트 파일: 아무것도 전송 안 하면 placeholder 가 dehydrated(x)로
-                    // 남는다. 빈 전송으로 완료 통지 (vault 0바이트 경로와 동일).
-                    transfer_chunk(connection_key, transfer_key, request_key, &[], 0, true)?;
-                }
-                break;
-            }
-            filled += n;
-            if filled == CHUNK {
-                transfer_chunk(connection_key, transfer_key, request_key, &buf, offset, true)?;
-                offset += CHUNK as i64;
-                filled = 0;
-            }
-        }
-        Ok(())
+        let dek = super::dek_for(node_id);
+        super::fetch_content(workspace, node_id, dek.as_deref(), |buf, offset| {
+            transfer_chunk(connection_key, transfer_key, request_key, buf, offset, true)
+        })
     }
 
     // FETCH_DATA 만 등록: 테이블은 connect 동안 유효해야 하므로 static.
@@ -353,7 +353,7 @@ mod imp {
         if CONNECTION.lock().unwrap().is_some() {
             return Ok(());
         }
-        let _ = CTX.set(HydrationCtx { config });
+        super::set_config(config);
         let path = HSTRING::from(sync_root);
         let result = unsafe {
             CfConnectSyncRoot(
@@ -534,30 +534,152 @@ mod imp {
     }
 }
 
+/// Windows 외 (Linux): Files On-Demand 가 없으므로 전체 미러.
+/// populate 가 폴더를 만들고, 디스크에 없는 파일은 다운로드 큐에 넣는다.
+/// 다운로드는 숨김 임시파일(`.이름.part`, watcher 무시 대상)에 쓴 뒤 mtime 을
+/// 서버 updated_at 으로 맞추고 rename: 반쯤 받은 파일이 보이거나 업로드되지 않는다.
 #[cfg(not(windows))]
 mod imp {
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+    use std::sync::mpsc::{channel, Receiver, Sender};
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, UNIX_EPOCH};
+
     use super::{ConnectConfig, PlaceholderFile};
 
-    pub fn register(_sync_root: &str) -> Result<(), String> {
-        Err("Cloud Files API 는 Windows 전용".into())
+    const WORKERS: usize = 4;
+
+    struct Job {
+        path: PathBuf,
+        workspace_id: String,
+        node_id: String,
+        mtime_ms: i64,
+        // 큐 등록 시점의 DEK: 그 사이 잠기면 암호문을 평문 이름으로 쓰지 않도록 고정.
+        dek: Option<Vec<u8>>,
     }
+
+    static QUEUE: Mutex<Option<Sender<Job>>> = Mutex::new(None);
+    // 큐에 있거나 받는 중인 경로: polling 마다 populate 가 같은 파일을 또 넣지 않게.
+    static PENDING: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+
+    fn enqueue(job: Job) {
+        {
+            let mut pending = PENDING.lock().unwrap();
+            if !pending.get_or_insert_with(HashSet::new).insert(job.path.clone()) {
+                return;
+            }
+        }
+        let mut queue = QUEUE.lock().unwrap();
+        let tx = queue.get_or_insert_with(|| {
+            let (tx, rx) = channel::<Job>();
+            let rx = Arc::new(Mutex::new(rx));
+            for _ in 0..WORKERS {
+                let rx = rx.clone();
+                std::thread::spawn(move || worker(rx));
+            }
+            tx
+        });
+        let _ = tx.send(job);
+    }
+
+    fn worker(rx: Arc<Mutex<Receiver<Job>>>) {
+        loop {
+            let Ok(job) = rx.lock().unwrap().recv() else { return };
+            if let Err(e) = download(&job) {
+                eprintln!("[vfs] 다운로드 실패 [{}]: {e}", job.path.display());
+            }
+            if let Some(p) = PENDING.lock().unwrap().as_mut() {
+                p.remove(&job.path);
+            }
+        }
+    }
+
+    fn part_path(path: &Path) -> PathBuf {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        path.with_file_name(format!(".{name}.part"))
+    }
+
+    fn download(job: &Job) -> Result<(), String> {
+        // 큐에 있는 동안 사용자가 같은 이름으로 만들었으면 덮지 않는다.
+        if job.path.exists() {
+            return Ok(());
+        }
+        let tmp = part_path(&job.path);
+        crate::watcher::self_write_begin(&job.path);
+        let result = (|| {
+            use std::io::Write;
+            let mut f = std::fs::File::create(&tmp).map_err(|e| format!("임시파일 생성: {e}"))?;
+            super::fetch_content(&job.workspace_id, &job.node_id, job.dek.as_deref(), |buf, _| {
+                f.write_all(buf).map_err(|e| format!("쓰기: {e}"))
+            })?;
+            // mtime = 서버 updated_at: JS 의 변경 감지(size/mtime 비교)가 에코를 거른다.
+            let mtime = UNIX_EPOCH + Duration::from_millis(job.mtime_ms.max(0) as u64);
+            f.set_modified(mtime).map_err(|e| format!("mtime: {e}"))?;
+            drop(f);
+            if job.dek.is_some() && super::dek_for(&job.node_id).is_none() {
+                return Err("받는 사이 보안 폴더가 잠김".into());
+            }
+            if job.path.exists() {
+                return Ok(()); // 받는 사이 사용자가 만든 파일 우선
+            }
+            std::fs::rename(&tmp, &job.path).map_err(|e| format!("rename: {e}"))
+        })();
+        let _ = std::fs::remove_file(&tmp);
+        crate::watcher::self_write_end(&job.path);
+        result
+    }
+
+    pub fn register(sync_root: &str) -> Result<(), String> {
+        std::fs::create_dir_all(sync_root).map_err(|e| format!("sync 폴더 생성 실패: {e}"))
+    }
+
     pub fn unregister(_sync_root: &str) -> Result<(), String> {
-        Err("Cloud Files API 는 Windows 전용".into())
+        Ok(())
     }
+
     pub fn populate(
-        _base_dir: &str,
-        _dirs: &[String],
-        _files: &[PlaceholderFile],
+        base_dir: &str,
+        dirs: &[String],
+        files: &[PlaceholderFile],
     ) -> Result<u32, String> {
-        Err("Cloud Files API 는 Windows 전용".into())
+        let base = Path::new(base_dir);
+        crate::watcher::mark_self_write(base);
+        std::fs::create_dir_all(base).map_err(|e| format!("base 폴더 생성 실패 {base_dir}: {e}"))?;
+
+        // 폴더 생성도 self-write: 안 그러면 watcher 가 사용자 생성으로 오인해 서버에 또 올린다.
+        for d in dirs {
+            let dir_path = base.join(d);
+            crate::watcher::mark_self_write(&dir_path);
+            std::fs::create_dir_all(&dir_path).map_err(|e| format!("폴더 생성 실패 {d}: {e}"))?;
+        }
+
+        let mut queued: u32 = 0;
+        for f in files {
+            let path = base.join(&f.relative_dir).join(&f.name);
+            if path.exists() {
+                continue; // 재실행 idempotent
+            }
+            enqueue(Job {
+                path,
+                workspace_id: f.workspace_id.clone(),
+                node_id: f.node_id.clone(),
+                mtime_ms: f.mtime_ms,
+                dek: super::dek_for(&f.node_id),
+            });
+            queued += 1;
+        }
+        Ok(queued)
     }
-    pub fn connect(_sync_root: &str, _config: ConnectConfig) -> Result<(), String> {
-        Err("Cloud Files API 는 Windows 전용".into())
+
+    pub fn connect(_sync_root: &str, config: ConnectConfig) -> Result<(), String> {
+        super::set_config(config);
+        Ok(())
     }
+
     pub fn disconnect() -> Result<(), String> {
-        Err("Cloud Files API 는 Windows 전용".into())
+        Ok(())
     }
-    pub fn set_deks(_map: std::collections::HashMap<String, Vec<u8>>) {}
 }
 
 #[tauri::command]
@@ -593,7 +715,7 @@ pub fn vfs_set_deks(deks: std::collections::HashMap<String, String>) -> Result<(
             .map_err(|e| format!("dek base64 ({node_id}): {e}"))?;
         map.insert(node_id, raw);
     }
-    imp::set_deks(map);
+    set_deks(map);
     Ok(())
 }
 
@@ -649,7 +771,7 @@ pub fn vfs_remove_dir(path: String) -> Result<(), String> {
 
 /// dir 안에서 allowed 에 없는 항목 전부 제거 (재귀). desired 상태로 강제 수렴.
 /// vault 폴더 한정 사용: 재시작/이름변경/잠금토글로 남은 잔재 placeholder 정리.
-/// allowed 에는 살릴 파일+중간 폴더 경로가 모두 들어와야 함 (소문자 비교).
+/// allowed 에는 살릴 파일+중간 폴더 경로가 모두 들어와야 함 (Windows 는 대소문자 무시).
 #[tauri::command]
 pub fn vfs_prune(dir: String, allowed: Vec<String>) -> Result<u32, String> {
     use std::collections::HashSet;
@@ -659,7 +781,7 @@ pub fn vfs_prune(dir: String, allowed: Vec<String>) -> Result<u32, String> {
     if !root.exists() {
         return Ok(0);
     }
-    let allow: HashSet<String> = allowed.iter().map(|p| p.to_lowercase()).collect();
+    let allow: HashSet<String> = allowed.iter().map(|p| crate::watcher::fold_case(p)).collect();
 
     // allowed 에 없는 경로 수집 (제거 대상). allowed 인 폴더는 안으로 재귀.
     fn walk(d: &Path, allow: &HashSet<String>, out: &mut Vec<PathBuf>) {
@@ -668,7 +790,7 @@ pub fn vfs_prune(dir: String, allowed: Vec<String>) -> Result<u32, String> {
         };
         for e in entries.flatten() {
             let p = e.path();
-            let key = p.to_string_lossy().to_lowercase();
+            let key = crate::watcher::fold_case(&p.to_string_lossy());
             if allow.contains(&key) {
                 if p.is_dir() {
                     walk(&p, allow, out); // 살릴 폴더: 안쪽 계속 검사
@@ -717,6 +839,17 @@ pub fn vfs_delete(paths: Vec<String>) -> Result<u32, String> {
 /// 충돌 사본 생성: 412(동시 수정) 시 로컬 버전을 별도 파일로 보존.
 /// `foo.docx` → `foo (충돌본 {date} {hostname}).docx`. self-write 등록 후 복사
 /// (watcher 의 create 무시: JS 가 명시적으로 업로드). 생성 경로 반환.
+fn hostname() -> String {
+    #[cfg(windows)]
+    let name = std::env::var("COMPUTERNAME").ok();
+    #[cfg(not(windows))]
+    let name = std::fs::read_to_string("/etc/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    name.unwrap_or_else(|| "PC".into())
+}
+
 #[tauri::command]
 pub fn vfs_make_conflict_copy(path: String, date: String) -> Result<String, String> {
     let src = std::path::Path::new(&path);
@@ -726,7 +859,7 @@ pub fn vfs_make_conflict_copy(path: String, date: String) -> Result<String, Stri
         .and_then(|s| s.to_str())
         .ok_or("file stem 없음")?;
     let ext = src.extension().and_then(|s| s.to_str());
-    let host = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into());
+    let host = hostname();
     let new_name = match ext {
         Some(e) => format!("{stem} (충돌본 {date} {host}).{e}"),
         None => format!("{stem} (충돌본 {date} {host})"),

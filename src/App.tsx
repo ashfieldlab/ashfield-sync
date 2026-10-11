@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { sep } from "@tauri-apps/api/path"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { openPath } from "@tauri-apps/plugin-opener"
@@ -95,23 +96,32 @@ function TitleBar() {
   )
 }
 
-// Windows 경로 비교 정규화: 구분자 통일 + 끝 슬래시 제거 + 소문자 (대소문자 무시)
+// 경로 구분자: Windows `\`, Linux `/`. 비교는 Windows 만 대소문자 무시.
+const SEP = sep()
+const IS_WINDOWS = SEP === "\\"
+function fold(p: string): string {
+  return IS_WINDOWS ? p.toLowerCase() : p
+}
+function trimSep(p: string): string {
+  return p.length > 1 ? p.replace(IS_WINDOWS ? /[\\/]+$/ : /\/+$/, "") : p
+}
+// 경로 비교 정규화: 구분자 통일 + 끝 구분자 제거 + (Windows) 소문자
 function normPath(p: string): string {
-  return p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase()
+  return fold(trimSep(IS_WINDOWS ? p.replace(/\//g, "\\") : p))
 }
 function baseName(p: string): string {
-  return p.replace(/\\+$/, "").split("\\").pop() ?? p
+  return trimSep(p).split(SEP).pop() ?? p
 }
 function dirName(p: string): string {
-  const parts = p.replace(/\\+$/, "").split("\\")
+  const parts = trimSep(p).split(SEP)
   parts.pop()
-  return parts.join("\\")
+  return parts.join(SEP)
 }
 
-// Windows 파일명 불가 문자: 암호화된(base64) 파일명 등은 placeholder 못 만듦.
-// 그런 노드는 싱크에서 skip (E2E 복호화는 V5 별도). 안 그러면 populate 실패.
+// 파일명 불가 문자 (Windows 는 / \ : * ? " < > |, Linux 는 /): 암호화된(base64)
+// 파일명 등은 못 만듦. 그런 노드는 싱크에서 skip. 안 그러면 populate 실패.
 function isSyncableName(name: string): boolean {
-  return name.length > 0 && !/[/\\:*?"<>|]/.test(name)
+  return name.length > 0 && !(IS_WINDOWS ? /[/\\:*?"<>|]/ : /[/\0]/).test(name)
 }
 
 function scopeLabel(sc: Scope): string {
@@ -328,15 +338,15 @@ function App() {
         parts.unshift(nameOf(cur))
         cur = cur.parent_id ? byId.get(cur.parent_id) : undefined
       }
-      return parts.join("\\")
+      return parts.join(SEP)
     }
     const syncable = (n: NodeResponse) =>
       !skipIds.has(n.id) &&
       isSyncableName(nameOf(n)) &&
-      !relDir(n).split("\\").some((seg) => seg && !isSyncableName(seg))
+      !relDir(n).split(SEP).some((seg) => seg && !isSyncableName(seg))
     const dirs = nodes
       .filter((n) => n.kind === "folder" && syncable(n))
-      .map((n) => (relDir(n) ? `${relDir(n)}\\${nameOf(n)}` : nameOf(n)))
+      .map((n) => (relDir(n) ? `${relDir(n)}${SEP}${nameOf(n)}` : nameOf(n)))
     const files = nodes
       .filter((n) => n.kind === "file" && syncable(n))
       .map((n) => ({
@@ -366,7 +376,7 @@ function App() {
       !skipIds.has(n.id) &&
       pathOf(n)
         .slice(baseDir.length + 1)
-        .split("\\")
+        .split(SEP)
         .every((seg) => isSyncableName(seg))
     return new Map(
       nodes
@@ -385,7 +395,7 @@ function App() {
         parts.unshift(nameOf(cur))
         cur = cur.parent_id ? byId.get(cur.parent_id) : undefined
       }
-      return `${baseDir}\\${parts.join("\\")}`
+      return [baseDir, ...parts].join(SEP)
     }
   }
 
@@ -423,7 +433,7 @@ function App() {
   async function syncVfs(workspace: string, sc: Scope, nodes: NodeResponse[], prune = false) {
     const stg = await getSettings()
     const key = `${workspace}|${sc}`
-    const baseDir = `${stg.syncRoot}\\${workspace}\\${scopeLabel(sc)}`
+    const baseDir = [trimSep(stg.syncRoot), workspace, scopeLabel(sc)].join(SEP)
     // vault 내용 처리:
     //   잠금해제됨 → 이름 복호화해 구조 그대로 표시 (복호화 실패분만 skip)
     //   잠김       → 내용 통째 skip (vault 루트만 빈 채로)
@@ -518,7 +528,7 @@ function App() {
     for (const vid of vaultIds) {
       const vnode = byId.get(vid)
       if (vnode) {
-        vaultRootsRef.current.set(pathOf(vnode).toLowerCase(), {
+        vaultRootsRef.current.set(fold(pathOf(vnode)), {
           workspace,
           vaultNodeId: vid,
         })
@@ -536,7 +546,7 @@ function App() {
         const vaultPath = pathOf(vnode)
         const allowed = [...next.values()]
           .map((e) => e.path)
-          .filter((p) => p.toLowerCase().startsWith(vaultPath.toLowerCase() + "\\"))
+          .filter((p) => fold(p).startsWith(fold(vaultPath) + SEP))
         try {
           await invoke("vfs_prune", { dir: vaultPath, allowed })
         } catch (err) {
@@ -615,16 +625,16 @@ function App() {
   async function parsePath(absPath: string) {
     const stg = await getSettings()
     const root = normPath(stg.syncRoot)
-    if (!normPath(absPath).startsWith(root + "\\")) return null
-    const rest = absPath.slice(stg.syncRoot.length).replace(/^\\+/, "")
-    const segs = rest.split("\\")
+    if (!normPath(absPath).startsWith(root + SEP)) return null
+    const rest = absPath.slice(trimSep(stg.syncRoot).length).replace(IS_WINDOWS ? /^[\\/]+/ : /^\/+/, "")
+    const segs = rest.split(SEP)
     if (segs.length < 2) return null
     const [workspace, scopeSeg] = segs
     const scope: Scope | null =
       scopeSeg === "내 파일" ? "personal" : scopeSeg === "워크스페이스" ? "shared" : null
     if (!scope) return null
     if (stg.excludedWorkspaces.includes(workspace)) return null
-    return { workspace, scope, baseDir: `${stg.syncRoot}\\${workspace}\\${scopeSeg}` }
+    return { workspace, scope, baseDir: [trimSep(stg.syncRoot), workspace, scopeSeg].join(SEP) }
   }
 
   // 부모 폴더 절대경로 → parent_id (baseDir 직속이면 null)
@@ -909,9 +919,9 @@ function App() {
   // 경로가 어느 vault 소속인지: 매칭되면 {워크스페이스, vault 노드}. 아니면 null.
   function vaultRootFor(p: string | null | undefined): { workspace: string; vaultNodeId: string } | null {
     if (!p) return null
-    const lower = p.toLowerCase()
+    const key = fold(p)
     for (const [root, info] of vaultRootsRef.current) {
-      if (lower === root || lower.startsWith(root + "\\")) return info
+      if (key === root || key.startsWith(root + SEP)) return info
     }
     return null
   }
@@ -1092,7 +1102,7 @@ function App() {
     }
     // SSE 실시간 nudge 시작 (활성/첫 워크스페이스 기준). polling 은 fallback 으로 유지.
     connectSse(syncedWorkspaces(me, stg.excludedWorkspaces)[0] ?? null)
-    setPollStatus(`탐색기 동기화 준비 완료, ${new Date().toLocaleTimeString()}`)
+    setPollStatus(`동기화 준비 완료, ${new Date().toLocaleTimeString()}`)
   }
 
   // SSE 연결: 활성 워크스페이스의 node 변경 nudge 구독. 토큰은 현재 access_token.
@@ -1331,7 +1341,7 @@ function App() {
     if (turningOff) {
       // 제외: 탐색기에서 워크스페이스 폴더 정리 (서버 원본은 그대로)
       try {
-        await invoke("vfs_remove_dir", { path: `${settings.syncRoot}\\${workspaceId}` })
+        await invoke("vfs_remove_dir", { path: [trimSep(settings.syncRoot), workspaceId].join(SEP) })
       } catch (err) {
         console.warn("[vfs] remove dir", err)
       }

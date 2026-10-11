@@ -28,10 +28,10 @@ Drive API 호스트는 `src-tauri/capabilities/default.json` 의 HTTP 허용 목
 
 - 브라우저로 로그인하고 `http://127.0.0.1:1421/oauth/callback` 으로 돌아옵니다. PKCE, `state`, `nonce`, `iss` 를 검증합니다.
 - `offline_access` 로 리프레시 토큰을 받고, 모든 요청에 `resource` 를 붙여 JWT 액세스 토큰을 받습니다.
-- 리프레시 토큰은 Windows 자격 증명 관리자에 저장합니다.
+- 리프레시 토큰은 OS 비밀 저장소에 저장합니다 (Windows 자격 증명 관리자, Linux Secret Service).
 
 **리프레시 토큰 회전**: 갱신할 때마다 새 토큰이 오고, 옛 토큰을 다시 쓰면 서버가 토큰 묶음 전체를 폐기합니다.
 그래서 앱의 모든 갱신은 `src-tauri/src/oauth.rs` 의 잠금 하나를 거치며, UI, SSE, Files On-Demand 가 같은 액세스 토큰을 공유합니다.
 
-**로그아웃** 은 서버에서 리프레시 토큰을 폐기하고 자격 증명 관리자에서 지웁니다.
+**로그아웃** 은 서버에서 리프레시 토큰을 폐기하고 비밀 저장소에서 지웁니다.
 기기를 원격으로 끊으려면 Account 의 "연결된 앱"을 사용하세요.

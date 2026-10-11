@@ -33,10 +33,19 @@ const HYDRATE_MAX: Duration = Duration::from_secs(300);
 // 완료 후 유예: 마지막 쓰기의 500ms 디바운스 + 지연 이벤트 흡수.
 const SELF_WRITE_GRACE: Duration = Duration::from_secs(3);
 
-/// 경로 정규화: `\\?\` verbatim 접두 제거 + 소문자화(대소문자 무시 FS 대비).
+/// 경로 정규화: `\\?\` verbatim 접두 제거 + 소문자화(Windows 는 대소문자 무시 FS).
 fn norm(path: &Path) -> String {
     let s = path.to_string_lossy();
-    s.strip_prefix(r"\\?\").unwrap_or(&s).to_lowercase()
+    fold_case(s.strip_prefix(r"\\?\").unwrap_or(&s))
+}
+
+/// 경로 비교용 대소문자 접기: Windows 만. Linux 는 대소문자를 구분한다.
+pub fn fold_case(s: &str) -> String {
+    if cfg!(windows) {
+        s.to_lowercase()
+    } else {
+        s.to_string()
+    }
 }
 
 /// 빠른 self-write(placeholder 생성, 삭제, rename 등): 이후 몇 초간 그 경로 무시.
@@ -48,8 +57,6 @@ pub fn mark_self_write(path: &Path) {
 
 /// hydration 쓰기 시작 직전 호출: 완료(self_write_end)까지 길게 억제.
 /// 다운로드가 10초 넘게 걸려도(대용량, 느린 회선) 완료 이벤트가 새지 않게 한다.
-// 호출부(vfs hydrate)가 windows-gated 라 non-windows 빌드에선 dead code.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub fn self_write_begin(path: &Path) {
     let mut guard = SELF_WRITES.lock().unwrap();
     let map = guard.get_or_insert_with(HashMap::new);
@@ -57,7 +64,6 @@ pub fn self_write_begin(path: &Path) {
 }
 
 /// hydration 완료(성공/실패 무관) 후 호출: 유예 시간만 남기고 곧 만료.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub fn self_write_end(path: &Path) {
     let mut guard = SELF_WRITES.lock().unwrap();
     if let Some(map) = guard.as_mut() {

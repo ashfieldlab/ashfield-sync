@@ -1,11 +1,11 @@
 /**
  * 앱 설정: tauri-plugin-store 기반 (settings.json).
  *
- * 실제 파일: %APPDATA%\<bundle-id>\settings.json: Windows 의 앱별 설정
- * 표준 위치. 비밀 아님 (refresh_token 은 Rust keychain 별도).
+ * 실제 파일: 앱별 설정 표준 위치의 settings.json (Windows %APPDATA%\<bundle-id>,
+ * Linux ~/.config/<bundle-id>). 비밀 아님 (refresh_token 은 Rust keychain 별도).
  *
  * 키:
- *   syncRoot           sync 폴더 위치 (default ~\Ashfield)
+ *   syncRoot           sync 폴더 위치 (default ~/Ashfield)
  *   excludedWorkspaces  opt-out 워크스페이스 목록 (default 빈 배열 = 전체 sync)
  *   lastSyncByWorkspace  워크스페이스별 delta polling 의 since 기준 (ISO): 워크스페이스마다
  *                      변경 스트림이 독립이라 단일 시각으로는 안 됨
