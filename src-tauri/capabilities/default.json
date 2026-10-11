@@ -25,8 +25,8 @@
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "http://localhost:*" },
-        { "url": "https://drive.example.com/*" }
+        { "url": "http://*:*" },
+        { "url": "https://*:*" }
       ]
     }
   ]

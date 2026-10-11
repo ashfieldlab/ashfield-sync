@@ -12,7 +12,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 
-import { env } from "./config"
+import { oauthClient, server } from "./config"
 
 export interface TokenSet {
   access_token: string
@@ -29,10 +29,10 @@ export function isAuthExpired(err: unknown): boolean {
 
 function oauthConfig() {
   return {
-    issuer: env.oauth.issuer,
-    client_id: env.oauth.clientId,
-    redirect_port: env.oauth.redirectPort,
-    resource: env.oauth.resource,
+    issuer: server().accountUrl,
+    client_id: oauthClient.clientId,
+    redirect_port: oauthClient.redirectPort,
+    resource: server().driveUrl,
   }
 }
 

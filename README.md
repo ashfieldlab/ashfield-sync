@@ -31,7 +31,7 @@ Windows 와 Linux 에서 동작하며, 실행 중인 [Ashfield Drive](https://gi
 Node.js, Rust, OS 별 Tauri 준비물이 필요합니다 ([Tauri 준비물](https://tauri.app/start/prerequisites/), [Linux](docs/linux.md)).
 
 ```bash
-cp .env.example .env   # 서버 주소 설정
+cp .env.example .env
 npm install
 npm run tauri dev
 ```

@@ -8,7 +8,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog"
 import { openPath } from "@tauri-apps/plugin-opener"
 
 import { api, ApiError, getToken, setActiveWorkspace, setRefreshHandler, setToken } from "./lib/api"
-import { env } from "./lib/config"
+import { defaultDriveUrl, discoverServer, server, setServer } from "./lib/config"
 import {
   oauthHasStoredRefresh,
   oauthLogin,
@@ -20,8 +20,10 @@ import * as e2e from "./lib/e2e/session"
 import {
   getLastSync,
   getOnboarded,
+  getSavedServer,
   getSettings,
   resetSettings,
+  saveServer,
   setExcludedWorkspaces,
   setLastSync,
   setOnboarded,
@@ -135,6 +137,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [pollStatus, setPollStatus] = useState<string | null>(null)
   const [onboarding, setOnboarding] = useState(false) // 첫 실행 마법사 표시
+  const [driveInput, setDriveInput] = useState(defaultDriveUrl)
   const [updateMsg, setUpdateMsg] = useState<string | null>(null)
   // E2E 보안 폴더 잠금해제 (V5): 해제돼야 vault 구조/이름 복호화
   const [e2eUnlocked, setE2eUnlocked] = useState(false)
@@ -193,6 +196,10 @@ function App() {
     void (async () => {
       try {
         setSettings(await getSettings())
+        const saved = await getSavedServer()
+        if (!saved) return
+        setServer(saved)
+        setDriveInput(saved.driveUrl)
         const stored = await oauthHasStoredRefresh()
         if (!stored) return
         const tokens = await oauthRefresh()
@@ -1086,7 +1093,7 @@ function App() {
       await invoke("vfs_connect", {
         syncRoot: stg.syncRoot,
         // 토큰은 Rust oauth 모듈의 공용 캐시에서 (로그인/refresh 가 설정을 이미 넘김)
-        config: { apiUrl: env.apiUrl },
+        config: { apiUrl: server().driveUrl },
       })
     } catch (err) {
       console.warn("[vfs] connect", err)
@@ -1111,7 +1118,7 @@ function App() {
     const token = getToken()
     if (!workspace || !token) return
     void invoke("sse_connect", {
-      url: `${env.apiUrl}/api/v1/nodes/events`,
+      url: `${server().driveUrl}/api/v1/nodes/events`,
       token,
       workspace,
     }).catch((err) => console.warn("[sse] connect", err))
@@ -1207,6 +1214,10 @@ function App() {
   async function handleLogin() {
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
+      const srv = await discoverServer(driveInput)
+      setServer(srv)
+      await saveServer(srv)
+      setDriveInput(srv.driveUrl)
       const tokens = await oauthLogin()
       setToken(tokens.access_token)
       const me = await loadMe()
@@ -1380,11 +1391,28 @@ function App() {
         <TitleBar />
         <main className="container">
           <h1>Ashfield</h1>
-          <div className="login">
-            <button onClick={handleLogin} disabled={state.loading}>
+          <form
+            className="login"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void handleLogin()
+            }}
+          >
+            <label className="login-label" htmlFor="drive-url">Drive 주소</label>
+            <input
+              id="drive-url"
+              type="text"
+              className="login-input"
+              placeholder="drive.example.com"
+              value={driveInput}
+              onChange={(e) => setDriveInput(e.target.value)}
+              autoFocus={!driveInput}
+              spellCheck={false}
+            />
+            <button type="submit" disabled={state.loading || !driveInput.trim()}>
               {state.loading ? "로그인 중..." : "Ashfield 계정으로 로그인"}
             </button>
-          </div>
+          </form>
           {state.error && <pre className="error">{state.error}</pre>}
         </main>
       </>

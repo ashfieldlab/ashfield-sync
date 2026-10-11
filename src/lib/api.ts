@@ -10,12 +10,12 @@
  *
  * Tauri 의 native fetch (Rust reqwest) 사용: WebView 의 브라우저 fetch 가
  * 아니라 OS 레벨 HTTP. CORS 가 적용되지 않아 dev (localhost:1420) 에서도
- * 운영 서버(VITE_API_URL)로 직접 호출 가능. 운영 빌드에서도 동일하게 동작.
+ * 사용자가 입력한 Drive 서버로 직접 호출 가능. 운영 빌드에서도 동일하게 동작.
  */
 
 import { fetch } from "@tauri-apps/plugin-http"
 
-import { env } from "./config"
+import { server } from "./config"
 
 let _token: string | null = null
 let _activeWorkspaceId: string | null = null
@@ -77,7 +77,7 @@ interface ApiOptions extends Omit<RequestInit, "body"> {
 
 async function doFetch(path: string, options: ApiOptions): Promise<Response> {
   const { body, ifMatch, workspaceId, headers: initHeaders, ...rest } = options
-  const url = path.startsWith("http") ? path : `${env.apiUrl}${path}`
+  const url = path.startsWith("http") ? path : `${server().driveUrl}${path}`
 
   const headers = new Headers(initHeaders)
   if (!headers.has("Content-Type") && body !== undefined) {

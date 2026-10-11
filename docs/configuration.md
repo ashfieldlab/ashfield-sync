@@ -1,25 +1,20 @@
 # 설정과 로그인
 
+## 서버 주소
+
+로그인 화면에서 Drive 주소(예: `drive.example.com`)를 입력합니다.
+앱은 `<Drive 주소>/api/client-config` 에서 계정 서버 주소를 받아 저장하고, API 는 같은 주소의 `/api/v1` 로 부릅니다.
+토큰의 `aud` 는 Drive 의 공개 주소(`BETTER_AUTH_URL`)이므로 Account 의 `DRIVE_URL`, Drive 백엔드의 `AUTH_AUDIENCE` 와 같아야 합니다.
+
 ## 환경 변수
 
-`.env.example` 을 `.env` 로 복사해 채웁니다. 값은 빌드할 때 앱에 들어갑니다.
+`.env.example` 을 `.env` 로 복사합니다. 값은 빌드할 때 앱에 들어갑니다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `VITE_ACCOUNT_URL` | `http://localhost:3300` | Ashfield Account 주소 (로그인) |
-| `VITE_DRIVE_URL` | `http://localhost:8200` | Drive API 주소 (`/api/v1` 호출) |
-| `VITE_DRIVE_RESOURCE` | `http://localhost:3200` | 토큰의 `aud`: Drive 의 공개 주소 |
+| `VITE_DRIVE_URL` | (없음) | 로그인 화면의 Drive 주소 기본값 |
 | `VITE_OAUTH_CLIENT_ID` | `ashfield-sync` | Account 에 등록된 클라이언트 |
 | `VITE_OAUTH_REDIRECT_PORT` | `1421` | 로그인 콜백 포트 |
-
-`VITE_DRIVE_RESOURCE` 는 Account 의 `DRIVE_URL`, Drive 백엔드의 `AUTH_AUDIENCE` 와 같아야 합니다.
-로컬에서는 API(8200)와 프론트(3200) 포트가 달라 따로 두었고, 운영에서 한 주소를 쓰면 둘 다 같은 값을 넣으면 됩니다.
-
-Drive API 호스트는 `src-tauri/capabilities/default.json` 의 HTTP 허용 목록에도 추가해야 합니다.
-
-```json
-{ "url": "https://drive.your-domain.com/*" }
-```
 
 ## 로그인 방식
 

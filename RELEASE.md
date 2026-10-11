@@ -30,19 +30,12 @@ npm run tauri build
 Linux 는 Linux 에서 빌드: `.deb`, `.rpm`, `.AppImage` 가 나온다. 자동 업데이트는
 AppImage 만 지원 (`.AppImage.sig`). deb/rpm 설치본은 새 패키지를 직접 설치.
 
-## 로그인 설정 (빌드 시 고정)
+## 서버 주소
 
-로그인은 Ashfield 계정 서버(OIDC)로 한다: Keycloak 아님. 계약:
-`ashfield-account/docs/adr/0001-account-server-contract.md`.
-`VITE_*` 값은 빌드 때 박히므로 릴리스 빌드 전에 `.env` 를 운영 값으로:
-
-| 변수 | 운영 예 | 비고 |
-|---|---|---|
-| `VITE_ACCOUNT_URL` | `https://account.example.com` | 계정 서버 issuer (디스커버리) |
-| `VITE_DRIVE_URL` | `https://drive.example.com` | Drive API base: `capabilities/default.json` allowlist 에도 추가 |
-| `VITE_DRIVE_RESOURCE` | `https://drive.example.com` | 계정 서버의 `DRIVE_URL`, Drive 백엔드의 `AUTH_AUDIENCE` 와 **정확히** 같게 |
-| `VITE_OAUTH_CLIENT_ID` | `ashfield-sync` | |
-| `VITE_OAUTH_REDIRECT_PORT` | `1421` | 계정 서버 `SYNC_REDIRECT_URIS` 에 `http://127.0.0.1:1421/oauth/callback` 등록 필요 |
+서버 주소는 빌드에 넣지 않는다: 사용자가 로그인 화면에서 Drive 주소를 입력한다
+(docs/configuration.md). 릴리스 빌드는 `.env` 의 `VITE_DRIVE_URL` 을 비우고 한다
+(localhost 기본값이 들어가지 않게). 계정 서버에는 `SYNC_REDIRECT_URIS` 에
+`http://127.0.0.1:1421/oauth/callback` 이 등록돼 있어야 한다.
 
 ## 배포 (GitHub Releases)
 

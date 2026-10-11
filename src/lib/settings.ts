@@ -5,6 +5,7 @@
  * Linux ~/.config/<bundle-id>). 비밀 아님 (refresh_token 은 Rust keychain 별도).
  *
  * 키:
+ *   server             접속 서버 {driveUrl, accountUrl} (로그인 화면에서 입력, config.ts)
  *   syncRoot           sync 폴더 위치 (default ~/Ashfield)
  *   excludedWorkspaces  opt-out 워크스페이스 목록 (default 빈 배열 = 전체 sync)
  *   lastSyncByWorkspace  워크스페이스별 delta polling 의 since 기준 (ISO): 워크스페이스마다
@@ -13,6 +14,8 @@
 
 import { homeDir, join } from "@tauri-apps/api/path"
 import { load, type Store } from "@tauri-apps/plugin-store"
+
+import type { Server } from "./config"
 
 export interface Settings {
   syncRoot: string
@@ -46,6 +49,16 @@ export async function resetSettings(): Promise<void> {
   const s = await store()
   await s.clear()
   await s.save()
+}
+
+export async function getSavedServer(): Promise<Server | null> {
+  const s = await store()
+  return (await s.get<Server>("server")) ?? null
+}
+
+export async function saveServer(server: Server): Promise<void> {
+  const s = await store()
+  await s.set("server", server)
 }
 
 export async function setSyncRoot(path: string): Promise<void> {
